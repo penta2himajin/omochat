@@ -1,0 +1,28 @@
+{
+  "name": "omochat",
+  "private": true,
+  "version": "0.0.9",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "prebuild": "node scripts/copy-litert-lm-wasm.mjs",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pack": "npm run build && evenhub pack app.json dist -o omochat.ehpk",
+    "serve:pwa": "node scripts/serve-pwa-with-coop-coep.mjs --dir dist --port 4180",
+    "serve:pwa:https": "node scripts/serve-pwa-with-coop-coep.mjs --dir dist --port 4180 --https --key ./certs/key.pem --cert ./certs/cert.pem"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.13",
+    "@litert-lm/core": "0.15.0"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.12",
+    "@webgpu/types": "^0.1.54",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
