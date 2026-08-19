@@ -1,5 +1,6 @@
 export type ErrorPhase =
   | 'webgpu'
+  | 'companion'
   | 'cdn-import'
   | 'engine-create'
   | 'conversation-create'
@@ -25,6 +26,8 @@ export function phaseLabel(phase: ErrorPhase): string {
   switch (phase) {
     case 'webgpu':
       return 'WebGPU check'
+    case 'companion':
+      return 'companion HTTP probe'
     case 'cdn-import':
       return 'LiteRT-LM CDN import'
     case 'engine-create':

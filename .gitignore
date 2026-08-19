@@ -2,6 +2,11 @@ node_modules/
 dist/
 public/litert-lm/
 *.ehpk
+companion/android/.gradle/
+companion/android/build/
+companion/android/app/build/
+companion/android/.idea/
+companion/android/local.properties
 .DS_Store
 *.log
 

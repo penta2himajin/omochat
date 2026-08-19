@@ -1,7 +1,14 @@
-export type WebGpuStatus = {
-  api: boolean
-  adapter: string | null
+export type WebGpuUnsupportReason = 'no-api' | 'no-adapter' | 'no-device'
+
+export type WebGpuAvailability = {
+  status: 'supported' | 'unsupported'
+  reason?: WebGpuUnsupportReason
+  adapterStrategy?: string
+  adapterInfo?: string
+  adapterFeatures?: string
   detail: string
+  /** Set when status is supported; reused by LiteRT-LM init. */
+  device?: GPUDevice
 }
 
 const ADAPTER_STRATEGIES: Array<{ label: string; opts: GPURequestAdapterOptions }> = [
@@ -13,59 +20,86 @@ const ADAPTER_STRATEGIES: Array<{ label: string; opts: GPURequestAdapterOptions 
 
 const DESIRED_FEATURES = ['shader-f16', 'subgroups'] as GPUFeatureName[]
 
-export async function probeWebGpu(): Promise<WebGpuStatus> {
-  if (typeof navigator === 'undefined' || !navigator.gpu) {
-    return { api: false, adapter: null, detail: 'navigator.gpu missing' }
+function formatAdapterInfo(adapter: GPUAdapter): string {
+  const info = adapter.info
+  if (!info) return '(no adapter.info)'
+  const parts = [info.vendor, info.architecture, info.device, info.description].filter(Boolean)
+  return parts.length > 0 ? parts.join(' / ') : '(empty adapter.info)'
+}
+
+function formatAdapterFeatures(adapter: GPUAdapter): string {
+  const features = [...adapter.features.values()]
+  return features.length > 0 ? features.join(', ') : '(none)'
+}
+
+async function requestDeviceFromAdapter(adapter: GPUAdapter): Promise<GPUDevice> {
+  const requiredFeatures: GPUFeatureName[] = []
+  for (const feature of DESIRED_FEATURES) {
+    if (adapter.features.has(feature)) requiredFeatures.push(feature)
   }
 
-  for (const { label, opts } of ADAPTER_STRATEGIES) {
-    const adapter = await navigator.gpu.requestAdapter(opts)
-    if (adapter) {
-      return { api: true, adapter: label, detail: `adapter ok (${label})` }
+  const requiredLimits: GPUDeviceDescriptor['requiredLimits'] = {
+    maxBufferSize: adapter.limits.maxBufferSize,
+    maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+    maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage,
+    maxTextureDimension2D: adapter.limits.maxTextureDimension2D,
+  }
+
+  return adapter.requestDevice({ requiredFeatures, requiredLimits })
+}
+
+/** Probe WebGPU end-to-end: requestAdapter + requestDevice. */
+export async function probeWebGpuAvailability(): Promise<WebGpuAvailability> {
+  if (typeof navigator === 'undefined' || !navigator.gpu) {
+    return {
+      status: 'unsupported',
+      reason: 'no-api',
+      detail: 'navigator.gpu missing',
     }
   }
 
+  const adapterErrors: string[] = []
+  for (const { label, opts } of ADAPTER_STRATEGIES) {
+    const adapter = await navigator.gpu.requestAdapter(opts)
+    if (!adapter) {
+      adapterErrors.push(`${label}: null`)
+      continue
+    }
+
+    try {
+      const device = await requestDeviceFromAdapter(adapter)
+      return {
+        status: 'supported',
+        adapterStrategy: label,
+        adapterInfo: formatAdapterInfo(adapter),
+        adapterFeatures: formatAdapterFeatures(adapter),
+        detail: `adapter+device ok (${label})`,
+        device,
+      }
+    } catch (err) {
+      adapterErrors.push(`${label}: device ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const hadAdapter = adapterErrors.some((e) => !e.includes(': null'))
   return {
-    api: true,
-    adapter: null,
-    detail: 'requestAdapter null (high-perf, low-power, fallback, default)',
+    status: 'unsupported',
+    reason: hadAdapter ? 'no-device' : 'no-adapter',
+    detail: hadAdapter
+      ? `requestDevice failed (${adapterErrors.join('; ')})`
+      : 'requestAdapter null (high-perf, low-power, fallback, default)',
   }
 }
 
-/** Pre-init WebGPU device on LiteRT-LM wasm before Engine.create. Returns strategy used. */
-export async function installWebGpuDevice(liteRtLmWasm: { preinitializedWebGPUDevice?: GPUDevice }): Promise<string> {
+/** Install probed device on LiteRT-LM wasm before Engine.create. */
+export async function installWebGpuDevice(
+  liteRtLmWasm: { preinitializedWebGPUDevice?: GPUDevice },
+  availability: WebGpuAvailability,
+): Promise<string> {
   if (liteRtLmWasm.preinitializedWebGPUDevice) return 'cached'
-
-  if (!navigator.gpu) throw new Error('navigator.gpu missing')
-
-  const errors: string[] = []
-  for (const { label, opts } of ADAPTER_STRATEGIES) {
-    try {
-      const adapter = await navigator.gpu.requestAdapter(opts)
-      if (!adapter) {
-        errors.push(`${label}: null`)
-        continue
-      }
-
-      const requiredFeatures: GPUFeatureName[] = []
-      for (const feature of DESIRED_FEATURES) {
-        if (adapter.features.has(feature)) requiredFeatures.push(feature)
-      }
-
-      const requiredLimits: GPUDeviceDescriptor['requiredLimits'] = {
-        maxBufferSize: adapter.limits.maxBufferSize,
-        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-        maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage,
-        maxTextureDimension2D: adapter.limits.maxTextureDimension2D,
-      }
-
-      const device = await adapter.requestDevice({ requiredFeatures, requiredLimits })
-      liteRtLmWasm.preinitializedWebGPUDevice = device
-      return label
-    } catch (err) {
-      errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`)
-    }
+  if (availability.status !== 'supported' || !availability.device) {
+    throw new Error(availability.detail || 'WebGPU unsupported')
   }
-
-  throw new Error(`No GPU adapter found. ${errors.join('; ')}`)
+  liteRtLmWasm.preinitializedWebGPUDevice = availability.device
+  return availability.adapterStrategy ?? 'probed'
 }

@@ -9,17 +9,16 @@ import {
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk'
 import { formatHubText, type DisplayState, type LoadingStep, type Mode } from './display.ts'
+import { copyEnvProbe, runEnvProbe, type EnvProbeResult } from './env/probe.ts'
+import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
-import { installWebGpuDevice, probeWebGpu, type WebGpuStatus } from './webgpu.ts'
+import { installWebGpuDevice, type WebGpuAvailability } from './webgpu.ts'
+import { resolveStartupOptions } from './startup.ts'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 const MODEL_URL_GEMMA4_E4B =
   'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.litertlm'
-
-// WebGPUが無い環境でも動かせるportable build。
-const MODEL_URL_QWEN3_0_6B_CPU =
-  'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm'
 
 const PROMPTS = [
   'こんにちは。短く自己紹介して。',
@@ -82,7 +81,6 @@ function handleEvenHubInput(
   }
 }
 
-
 function modelLabelFromUrl(url: string): string {
   try {
     return new URL(url).pathname.split('/').pop() ?? url
@@ -96,13 +94,10 @@ function appendToTail(current: string, next: string) {
 }
 
 function stripThinkBlock(text: string): string {
-  // Qwen3系は <think> ... </think> を返すことがある。
-  // 表示は「答え部分のみ」にするため、思考ブロックを落とす。
   const start = text.indexOf('<think>')
   if (start < 0) return text.trim()
   const end = text.indexOf('</think>', start)
   if (end < 0) return text.slice(0, start).trim()
-  // '</think>' の長さは 8。
   return (text.slice(0, start) + text.slice(end + 8)).trim()
 }
 
@@ -118,20 +113,21 @@ const LITERT_LM_WASM_PATH = '/litert-lm/wasm/'
 
 async function createLmConversation(
   modelUrl: string,
+  webgpu: WebGpuAvailability,
   onStep: (step: LoadingStep) => void,
-  webGpu: WebGpuStatus,
-  backendOverride?: number,
 ): Promise<LmBundle> {
-  onStep('webgpu')
-  const backend = backendOverride ?? (webGpu.adapter ? Backend.GPU_ARTISAN : Backend.CPU)
-  const wantWebGpu = backend === Backend.GPU_ARTISAN
+  if (webgpu.status !== 'supported') {
+    throw Object.assign(
+      formatThrownError(new Error(`WebGPU ${webgpu.reason ?? 'unsupported'}: ${webgpu.detail}`), 'webgpu'),
+      { phase: 'webgpu' },
+    )
+  }
 
   onStep('cdn-import')
   try {
     await loadLiteRtLm(LITERT_LM_WASM_PATH)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    // リトライ時に LiteRT-LM が既にロード済みの場合がある。
     if (msg.includes('already loading') || msg.includes('already loaded')) {
       // ignore
     } else {
@@ -140,24 +136,18 @@ async function createLmConversation(
   }
 
   onStep('engine-create')
-  if (wantWebGpu) {
-    try {
-      const wasm = getGlobalLiteRtLm().liteRtLmWasm
-      const strategy = await installWebGpuDevice(wasm)
-      webGpu.adapter = strategy
-      webGpu.detail = `device via ${strategy}`
-    } catch (err) {
-      // GPU戦略を捨てる: ここで落ちてもCPU側で動く可能性がある。
-      // （ただしGemma4 web buildsはCPU不可なので、この場合は結局失敗する）
-      throw Object.assign(formatThrownError(err, 'webgpu'), { phase: 'webgpu' })
-    }
+  try {
+    const wasm = getGlobalLiteRtLm().liteRtLmWasm
+    await installWebGpuDevice(wasm, webgpu)
+  } catch (err) {
+    throw Object.assign(formatThrownError(err, 'webgpu'), { phase: 'webgpu' })
   }
 
   let engine: LmBundle['engine']
   try {
     engine = await Engine.create({
       model: modelUrl,
-      backend,
+      backend: Backend.GPU_ARTISAN,
     } as any)
   } catch (err) {
     throw Object.assign(formatThrownError(err, 'engine-create'), { phase: 'engine-create' })
@@ -199,8 +189,13 @@ function mountWebUi(root: HTMLElement) {
   const sendBtn = document.createElement('button')
   sendBtn.textContent = '送信'
 
+  const copyBtn = document.createElement('button')
+  copyBtn.textContent = '診断コピー'
+  copyBtn.type = 'button'
+
   controls.appendChild(input)
   controls.appendChild(sendBtn)
+  controls.appendChild(copyBtn)
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -225,6 +220,7 @@ function mountWebUi(root: HTMLElement) {
       input.value = ''
     },
     onSend: (fn: () => void) => sendBtn.addEventListener('click', fn),
+    onCopyDiagnostics: (fn: () => void) => copyBtn.addEventListener('click', fn),
     setSendDisabled: (v: boolean) => {
       sendBtn.disabled = v
     },
@@ -238,13 +234,11 @@ function toDisplayState(args: {
   streamingTail: string
   loadingStep?: LoadingStep
   modelUrl: string
-  webGpu: WebGpuStatus
+  env: EnvProbeResult
+  companion: CompanionProbeResult
+  probeOnly: boolean
+  companionProbe: boolean
   error?: AppError
-  backendLabel: string
-  secureContext: boolean
-  crossOriginIsolated: boolean
-  protocol: string
-  userAgent: string
 }): DisplayState {
   return {
     mode: args.mode,
@@ -253,16 +247,12 @@ function toDisplayState(args: {
     messages: args.messages,
     streamingTail: args.streamingTail,
     loadingStep: args.loadingStep,
-    webGpu: args.webGpu.api,
-    webGpuAdapter: args.webGpu.adapter,
-    webGpuDetail: args.webGpu.detail,
-    secureContext: args.secureContext,
-    crossOriginIsolated: args.crossOriginIsolated,
-    protocol: args.protocol,
-    userAgent: args.userAgent,
+    env: args.env,
+    companion: args.companion,
     modelLabel: modelLabelFromUrl(args.modelUrl),
+    probeOnly: args.probeOnly,
+    companionProbe: args.companionProbe,
     error: args.error,
-    backendLabel: args.backendLabel,
   }
 }
 
@@ -271,19 +261,14 @@ async function main() {
   const ui = mountWebUi(root)
 
   const userModelUrl = import.meta.env.VITE_MODEL_URL || MODEL_URL_GEMMA4_E4B
-
-  // When opening with `?probeOnly=1`, skip model downloads and only probe WebGPU/origin isolation.
-  const probeOnly = new URLSearchParams(window.location.search).get('probeOnly') === '1'
-
-  const env = {
-    secureContext: typeof window !== 'undefined' ? window.isSecureContext : false,
-    crossOriginIsolated: typeof window !== 'undefined' && (window as any).crossOriginIsolated === true,
-    protocol: typeof window !== 'undefined' ? window.location.protocol : '',
-    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-  }
+  const evenHub = evenHubHostPresent()
+  const { probeOnly, companionProbe, shouldProbeCompanion, skipModelLoad } = resolveStartupOptions(
+    window.location.search,
+    evenHub,
+  )
 
   let mode: Mode = 'loading'
-  let loadingStep: LoadingStep | undefined = 'webgpu'
+  let loadingStep: LoadingStep | undefined = 'env-probe'
   let selectedPromptIndex = 0
   let messages: ChatMessage[] = []
   let streamingTail = ''
@@ -293,9 +278,23 @@ async function main() {
   let conversation: LmBundle['conversation'] | null = null
 
   let hubPaint: (() => void) | null = null
-  let webGpuStatus: WebGpuStatus = { api: false, adapter: null, detail: 'not probed' }
+  let envProbe: EnvProbeResult = {
+    origin: '',
+    protocol: '',
+    secureContext: false,
+    crossOriginIsolated: false,
+    uaFull: '',
+    uad: null,
+    webgl2: false,
+    webglRenderer: null,
+    webgpu: { status: 'unsupported', detail: 'not probed' },
+  }
+  let companionResult: CompanionProbeResult = {
+    status: 'skip',
+    url: '',
+    detail: 'not probed',
+  }
   let activeModelUrl = userModelUrl
-  let backendLabel = 'webgpu'
 
   const display = (): DisplayState =>
     toDisplayState({
@@ -305,13 +304,11 @@ async function main() {
       streamingTail,
       loadingStep,
       modelUrl: activeModelUrl,
-      webGpu: webGpuStatus,
+      env: envProbe,
+      companion: companionResult,
+      probeOnly,
+      companionProbe,
       error,
-      backendLabel,
-      secureContext: env.secureContext,
-      crossOriginIsolated: env.crossOriginIsolated,
-      protocol: env.protocol,
-      userAgent: env.userAgent.slice(0, 60),
     })
 
   const render = () => {
@@ -338,6 +335,11 @@ async function main() {
     streamingTail = ''
     render()
     console.error('[omochat]', error)
+  }
+
+  const copyDiagnostics = async () => {
+    const ok = await copyEnvProbe(envProbe)
+    ui.setStatus(ok ? 'diagnostics copied' : 'copy failed')
   }
 
   const startGeneration = async (prompt: string) => {
@@ -403,63 +405,64 @@ async function main() {
     const q = ui.getInput()
     if (q) void startGeneration(q)
   })
+  ui.onCopyDiagnostics(() => {
+    void copyDiagnostics()
+  })
 
   render()
 
   try {
     mode = 'loading'
-    loadingStep = 'webgpu'
+    loadingStep = 'env-probe'
     error = undefined
-    webGpuStatus = await probeWebGpu()
-
-    if (!webGpuStatus.adapter) {
-      backendLabel = 'cpu'
-      activeModelUrl = MODEL_URL_QWEN3_0_6B_CPU
-    } else {
-      backendLabel = 'webgpu'
-      activeModelUrl = userModelUrl
-    }
-
+    envProbe = await runEnvProbe()
     render()
 
-    if (probeOnly) {
-      loadingStep = 'done'
-      mode = 'idle'
-      activeModelUrl = '(probeOnly: model not loaded)'
-      backendLabel = webGpuStatus.adapter ? 'webgpu(probeOnly)' : 'cpu(probeOnly)'
+    if (shouldProbeCompanion) {
+      loadingStep = 'companion-probe'
+      render()
+      companionResult = await probeCompanion()
       render()
     } else {
-      let created: Awaited<ReturnType<typeof createLmConversation>>
-      try {
-        created = await createLmConversation(
-          activeModelUrl,
-          (step) => {
-            loadingStep = step
-            render()
-          },
-          webGpuStatus,
-        )
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        // GPU/streaming が未対応のモデルだった場合、Qwen3 を CPU で再試行。
-        if (msg.includes('Streaming kTfLitePrefillDecode models is not supported yet')) {
-          activeModelUrl = MODEL_URL_QWEN3_0_6B_CPU
-          backendLabel = 'cpu'
-          loadingStep = 'engine-create'
-          render()
-          created = await createLmConversation(
-            activeModelUrl,
-            (step) => {
-              loadingStep = step
-              render()
-            },
-            webGpuStatus,
-            Backend.CPU,
-          )
-        } else {
-          throw err
-        }
+      companionResult = { status: 'skip', url: '', detail: 'disabled' }
+    }
+
+    if (skipModelLoad) {
+      if (companionProbe) {
+        activeModelUrl = companionResult.status === 'ok'
+          ? '(companionProbe: ok)'
+          : '(companionProbe: failed)'
+      } else {
+        activeModelUrl = '(probeOnly: model not loaded)'
       }
+      loadingStep = 'done'
+      mode = companionProbe && companionResult.status === 'fail' ? 'error' : 'idle'
+      if (mode === 'error') {
+        error = formatThrownError(
+          new Error(`Companion unreachable: ${companionResult.detail}`),
+          'companion',
+        )
+      }
+      render()
+    } else if (envProbe.webgpu.status !== 'supported') {
+      activeModelUrl = '(webgpu unsupported: model not loaded)'
+      throw Object.assign(
+        formatThrownError(
+          new Error(`WebGPU unsupported (${envProbe.webgpu.reason ?? 'unknown'}): ${envProbe.webgpu.detail}`),
+          'webgpu',
+        ),
+        { phase: 'webgpu' },
+      )
+    } else {
+      activeModelUrl = userModelUrl
+      const created = await createLmConversation(
+        activeModelUrl,
+        envProbe.webgpu,
+        (step) => {
+          loadingStep = step
+          render()
+        },
+      )
       engine = created.engine
       conversation = created.conversation
       loadingStep = 'done'
@@ -519,8 +522,11 @@ async function main() {
               return
             }
             if (mode === 'error') {
-              // Retry init on press when stuck in error.
               location.reload()
+              return
+            }
+            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') {
+              void copyDiagnostics()
               return
             }
             void startGeneration(promptFromSelection())
@@ -530,16 +536,22 @@ async function main() {
               cancelGeneration()
               return
             }
+            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') {
+              void copyDiagnostics()
+              return
+            }
             selectedPromptIndex = (selectedPromptIndex + 1) % PROMPTS.length
             render()
           },
           swipeUp: () => {
             if (mode === 'thinking') return
+            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') return
             selectedPromptIndex = (selectedPromptIndex - 1 + PROMPTS.length) % PROMPTS.length
             render()
           },
           swipeDown: () => {
             if (mode === 'thinking') return
+            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') return
             selectedPromptIndex = (selectedPromptIndex + 1) % PROMPTS.length
             render()
           },
