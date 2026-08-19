@@ -51,10 +51,10 @@ export function formatHubText(state: DisplayState): string {
     lines.push(`step: ${label}`)
   }
 
-  lines.push(`companion: ${companion.status}`)
-  if (companion.url) lines.push(`companion-url: ${clip(companion.url, 120)}`)
-  if (companion.body) lines.push(`companion-body: ${clip(companion.body, 120)}`)
-  if (companion.detail) lines.push(`companion-detail: ${clip(companion.detail, 160)}`)
+  lines.push(`omoserv: ${companion.status}`)
+  if (companion.url) lines.push(`omoserv-url: ${clip(companion.url, 120)}`)
+  if (companion.body) lines.push(`omoserv-body: ${clip(companion.body, 120)}`)
+  if (companion.detail) lines.push(`omoserv-detail: ${clip(companion.detail, 160)}`)
 
   lines.push(`origin: ${env.origin}`)
   lines.push(`proto: ${env.protocol}`)

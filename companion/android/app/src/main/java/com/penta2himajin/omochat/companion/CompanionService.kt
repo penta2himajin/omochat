@@ -41,10 +41,10 @@ class CompanionService : Service() {
     private fun ensureChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "omochat companion",
+            "omoserv",
             NotificationManager.IMPORTANCE_LOW,
         )
-        channel.description = "Keeps the local HTTP API running for omochat"
+        channel.description = "Keeps the omoserv HTTP API running for omochat"
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
@@ -56,7 +56,7 @@ class CompanionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("omochat companion")
+            .setContentTitle("omoserv")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(open)
@@ -65,7 +65,7 @@ class CompanionService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "omochat_companion"
+        private const val CHANNEL_ID = "omoserv"
         private const val NOTIFICATION_ID = 8765
         private const val SOCKET_READ_TIMEOUT = 5000
     }

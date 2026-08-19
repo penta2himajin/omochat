@@ -17,7 +17,7 @@ class CompanionHttpServer : NanoHTTPD(CompanionConfig.HOST, CompanionConfig.PORT
                 newFixedLengthResponse(
                     Response.Status.OK,
                     "application/json",
-                    """{"ok":true,"service":"omochat-companion","port":${CompanionConfig.PORT}}""",
+                    """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT}}""",
                 ),
             )
             else -> withCors(

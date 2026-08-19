@@ -9,7 +9,7 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Download models and reach the local omochat companion HTTP API.",
+      "desc": "Download models and reach the local omoserv HTTP API for omochat.",
       "whitelist": [
         "http://127.0.0.1:8765",
         "https://huggingface.co",

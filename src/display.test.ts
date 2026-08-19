@@ -36,9 +36,9 @@ function minimalState(overrides: Partial<DisplayState>): DisplayState {
 describe('formatHubText companion section', () => {
   it('always includes companion lines after a probe attempt', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('companion: fail')
-    expect(text).toContain('companion-url: http://127.0.0.1:8765/hello')
-    expect(text).toContain('companion-detail: network error')
+    expect(text).toContain('omoserv: fail')
+    expect(text).toContain('omoserv-url: http://127.0.0.1:8765/hello')
+    expect(text).toContain('omoserv-detail: network error')
   })
 
   it('includes companion ok body when present', () => {
@@ -52,8 +52,8 @@ describe('formatHubText companion section', () => {
         },
       }),
     )
-    expect(text).toContain('companion: ok')
-    expect(text).toContain('companion-body: Hello, world')
+    expect(text).toContain('omoserv: ok')
+    expect(text).toContain('omoserv-body: Hello, world')
   })
 
   it('shows companion skip when explicitly disabled', () => {
@@ -62,6 +62,6 @@ describe('formatHubText companion section', () => {
         companion: { status: 'skip', url: '', detail: 'disabled' },
       }),
     )
-    expect(text).toContain('companion: skip')
+    expect(text).toContain('omoserv: skip')
   })
 })

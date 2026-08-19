@@ -27,9 +27,11 @@ class MainActivity : AppCompatActivity() {
         )
 
         status.text = buildString {
-            appendLine("omochat companion")
+            appendLine("omoserv")
+            appendLine("Local AI for omochat")
             appendLine("GET ${CompanionConfig.BASE_URL}/hello")
             appendLine("GET ${CompanionConfig.BASE_URL}/health")
+            appendLine("API  ${CompanionConfig.BASE_URL}/v1")
             appendLine()
             append("Keep this app running (notification).")
         }

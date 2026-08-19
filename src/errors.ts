@@ -27,7 +27,7 @@ export function phaseLabel(phase: ErrorPhase): string {
     case 'webgpu':
       return 'WebGPU check'
     case 'companion':
-      return 'companion HTTP probe'
+      return 'omoserv HTTP probe'
     case 'cdn-import':
       return 'LiteRT-LM CDN import'
     case 'engine-create':
