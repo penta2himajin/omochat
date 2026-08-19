@@ -1,6 +1,6 @@
 import { phaseLabel, type AppError } from './errors.ts'
 
-export const APP_VERSION = '0.0.9'
+export const APP_VERSION = '0.0.10'
 export const TEXT_UPGRADE_MAX = 2000
 
 export type Mode = 'loading' | 'idle' | 'thinking' | 'error'

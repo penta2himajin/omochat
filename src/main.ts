@@ -272,6 +272,9 @@ async function main() {
 
   const userModelUrl = import.meta.env.VITE_MODEL_URL || MODEL_URL_GEMMA4_E4B
 
+  // When opening with `?probeOnly=1`, skip model downloads and only probe WebGPU/origin isolation.
+  const probeOnly = new URLSearchParams(window.location.search).get('probeOnly') === '1'
+
   const env = {
     secureContext: typeof window !== 'undefined' ? window.isSecureContext : false,
     crossOriginIsolated: typeof window !== 'undefined' && (window as any).crossOriginIsolated === true,
@@ -419,24 +422,15 @@ async function main() {
 
     render()
 
-    let created: Awaited<ReturnType<typeof createLmConversation>>
-    try {
-      created = await createLmConversation(
-        activeModelUrl,
-        (step) => {
-          loadingStep = step
-          render()
-        },
-        webGpuStatus,
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // GPU/streaming が未対応のモデルだった場合、Qwen3 を CPU で再試行。
-      if (msg.includes('Streaming kTfLitePrefillDecode models is not supported yet')) {
-        activeModelUrl = MODEL_URL_QWEN3_0_6B_CPU
-        backendLabel = 'cpu'
-        loadingStep = 'engine-create'
-        render()
+    if (probeOnly) {
+      loadingStep = 'done'
+      mode = 'idle'
+      activeModelUrl = '(probeOnly: model not loaded)'
+      backendLabel = webGpuStatus.adapter ? 'webgpu(probeOnly)' : 'cpu(probeOnly)'
+      render()
+    } else {
+      let created: Awaited<ReturnType<typeof createLmConversation>>
+      try {
         created = await createLmConversation(
           activeModelUrl,
           (step) => {
@@ -444,17 +438,34 @@ async function main() {
             render()
           },
           webGpuStatus,
-          Backend.CPU,
         )
-      } else {
-        throw err
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        // GPU/streaming が未対応のモデルだった場合、Qwen3 を CPU で再試行。
+        if (msg.includes('Streaming kTfLitePrefillDecode models is not supported yet')) {
+          activeModelUrl = MODEL_URL_QWEN3_0_6B_CPU
+          backendLabel = 'cpu'
+          loadingStep = 'engine-create'
+          render()
+          created = await createLmConversation(
+            activeModelUrl,
+            (step) => {
+              loadingStep = step
+              render()
+            },
+            webGpuStatus,
+            Backend.CPU,
+          )
+        } else {
+          throw err
+        }
       }
+      engine = created.engine
+      conversation = created.conversation
+      loadingStep = 'done'
+      mode = 'idle'
+      render()
     }
-    engine = created.engine
-    conversation = created.conversation
-    loadingStep = 'done'
-    mode = 'idle'
-    render()
   } catch (err) {
     fail(err, 'engine-create')
   }
