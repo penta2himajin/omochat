@@ -14,6 +14,16 @@ import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
 import { installWebGpuDevice, type WebGpuAvailability } from './webgpu.ts'
 import { resolveStartupOptions } from './startup.ts'
+import { createOpenAiClient, type OpenAiClient } from './openai/client.ts'
+import {
+  browserConfigStorage,
+  evenHubConfigStorage,
+  isApiConfigComplete,
+  loadApiConfig,
+  type ConfigStorage,
+  type OmochatApiConfig,
+} from './openai/config.ts'
+import { mountPhoneSettings } from './phone-settings.ts'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -174,6 +184,9 @@ async function createLmConversation(
 }
 
 function mountWebUi(root: HTMLElement) {
+  const settings = document.createElement('div')
+  settings.id = 'phone-settings'
+
   const status = document.createElement('div')
   status.className = 'status'
 
@@ -204,11 +217,13 @@ function mountWebUi(root: HTMLElement) {
     }
   })
 
+  root.appendChild(settings)
   root.appendChild(status)
   root.appendChild(chat)
   root.appendChild(controls)
 
   return {
+    settingsRoot: settings,
     setStatus: (text: string) => {
       status.textContent = text
     },
@@ -276,8 +291,12 @@ async function main() {
 
   let engine: LmBundle['engine'] | null = null
   let conversation: LmBundle['conversation'] | null = null
+  let openaiClient: OpenAiClient | null = null
+  let apiConfig: OmochatApiConfig | null = null
+  let backendKind: 'webgpu' | 'omoserv' | 'none' = 'none'
 
   let hubPaint: (() => void) | null = null
+  let configStorage: ConfigStorage = browserConfigStorage()
   let envProbe: EnvProbeResult = {
     origin: '',
     protocol: '',
@@ -342,8 +361,30 @@ async function main() {
     ui.setStatus(ok ? 'diagnostics copied' : 'copy failed')
   }
 
+  const canChat = () => backendKind === 'webgpu' || backendKind === 'omoserv'
+
+  const applyApiConfig = (config: OmochatApiConfig | null) => {
+    apiConfig = config
+    if (backendKind === 'webgpu') return
+    if (isApiConfigComplete(config)) {
+      openaiClient = createOpenAiClient(config)
+      backendKind = 'omoserv'
+      activeModelUrl = '(omoserv OpenAI API)'
+      if (mode === 'error' && error?.phase === 'companion') {
+        error = undefined
+        mode = 'idle'
+      }
+    } else if (backendKind === 'omoserv') {
+      openaiClient = null
+      backendKind = 'none'
+      activeModelUrl = '(omoserv: configure API in phone settings)'
+    }
+    render()
+  }
+
   const startGeneration = async (prompt: string) => {
-    if (!conversation || mode === 'thinking') return
+    if (mode === 'thinking') return
+    if (!conversation && !openaiClient) return
 
     mode = 'thinking'
     streamingTail = ''
@@ -355,29 +396,57 @@ async function main() {
     let lastUiRenderTs = performance.now()
 
     try {
-      conversation.cancel?.()
-      const stream = conversation.sendMessageStreaming(prompt)
-      for await (const chunk of stream) {
-        const items = (chunk as { content?: Array<{ type?: string; text?: string }> })?.content
-        if (Array.isArray(items)) {
-          for (const item of items) {
-            if (item?.type === 'text' && typeof item.text === 'string') {
-              assistantDraft = appendToTail(assistantDraft, item.text)
-            } else if (typeof item?.text === 'string') {
-              assistantDraft = appendToTail(assistantDraft, item.text)
-            }
+      if (openaiClient) {
+        const history = messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
+        const stream = openaiClient.streamChatCompletion({
+          model: 'gemma-4-e2b',
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display.',
+            },
+            ...history,
+          ],
+        })
+        for await (const chunk of stream) {
+          assistantDraft = appendToTail(assistantDraft, chunk)
+          streamingTail = stripThinkBlock(assistantDraft)
+          const now = performance.now()
+          if (now - lastUiRenderTs > 50) {
+            lastUiRenderTs = now
+            render()
           }
-        } else if (typeof (chunk as { text?: string })?.text === 'string') {
-          assistantDraft = appendToTail(assistantDraft, (chunk as { text: string }).text)
+          if (mode !== 'thinking') break
         }
+      } else if (conversation) {
+        conversation.cancel?.()
+        const stream = conversation.sendMessageStreaming(prompt)
+        for await (const chunk of stream) {
+          const items = (chunk as { content?: Array<{ type?: string; text?: string }> })?.content
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              if (item?.type === 'text' && typeof item.text === 'string') {
+                assistantDraft = appendToTail(assistantDraft, item.text)
+              } else if (typeof item?.text === 'string') {
+                assistantDraft = appendToTail(assistantDraft, item.text)
+              }
+            }
+          } else if (typeof (chunk as { text?: string })?.text === 'string') {
+            assistantDraft = appendToTail(assistantDraft, (chunk as { text: string }).text)
+          }
 
-        streamingTail = stripThinkBlock(assistantDraft)
-        const now = performance.now()
-        if (now - lastUiRenderTs > 50) {
-          lastUiRenderTs = now
-          render()
+          streamingTail = stripThinkBlock(assistantDraft)
+          const now = performance.now()
+          if (now - lastUiRenderTs > 50) {
+            lastUiRenderTs = now
+            render()
+          }
+          if (mode !== 'thinking') break
         }
-        if (mode !== 'thinking') break
       }
 
       if (mode === 'thinking') {
@@ -411,6 +480,10 @@ async function main() {
 
   render()
 
+  mountPhoneSettings(ui.settingsRoot, configStorage, (cfg) => {
+    applyApiConfig(cfg)
+  })
+
   try {
     mode = 'loading'
     loadingStep = 'env-probe'
@@ -439,21 +512,12 @@ async function main() {
       mode = companionProbe && companionResult.status === 'fail' ? 'error' : 'idle'
       if (mode === 'error') {
         error = formatThrownError(
-          new Error(`Companion unreachable: ${companionResult.detail}`),
+          new Error(`omoserv unreachable: ${companionResult.detail}`),
           'companion',
         )
       }
       render()
-    } else if (envProbe.webgpu.status !== 'supported') {
-      activeModelUrl = '(webgpu unsupported: model not loaded)'
-      throw Object.assign(
-        formatThrownError(
-          new Error(`WebGPU unsupported (${envProbe.webgpu.reason ?? 'unknown'}): ${envProbe.webgpu.detail}`),
-          'webgpu',
-        ),
-        { phase: 'webgpu' },
-      )
-    } else {
+    } else if (envProbe.webgpu.status === 'supported') {
       activeModelUrl = userModelUrl
       const created = await createLmConversation(
         activeModelUrl,
@@ -465,9 +529,25 @@ async function main() {
       )
       engine = created.engine
       conversation = created.conversation
+      openaiClient = null
+      backendKind = 'webgpu'
       loadingStep = 'done'
       mode = 'idle'
       render()
+    } else {
+      const cfg = await loadApiConfig(configStorage)
+      if (isApiConfigComplete(cfg)) {
+        applyApiConfig(cfg)
+        loadingStep = 'done'
+        mode = 'idle'
+        render()
+      } else {
+        backendKind = 'none'
+        activeModelUrl = '(setup: set omoserv URL/token in phone settings)'
+        loadingStep = 'done'
+        mode = 'idle'
+        render()
+      }
     }
   } catch (err) {
     fail(err, 'engine-create')
@@ -476,6 +556,15 @@ async function main() {
   if (evenHubHostPresent()) {
     try {
       const hub = await waitForEvenAppBridge()
+      configStorage = evenHubConfigStorage(hub)
+      apiConfig = await loadApiConfig(configStorage)
+      if (backendKind !== 'webgpu' && !skipModelLoad) {
+        applyApiConfig(apiConfig)
+      }
+      mountPhoneSettings(ui.settingsRoot, configStorage, (cfg) => {
+        applyApiConfig(cfg)
+      })
+
       const CID = 1
       const CNAME = 'chat'
 
@@ -511,7 +600,15 @@ async function main() {
         }),
       )
 
-      root.style.display = 'none'
+      // Keep phone settings visible when opened from Even phone app; hide chrome for glasses paint focus.
+      hub.onLaunchSource((source) => {
+        if (source === 'glassesMenu') {
+          ui.settingsRoot.style.display = 'none'
+        } else {
+          ui.settingsRoot.style.display = ''
+        }
+      })
+
       hubPaint()
 
       hub.onEvenHubEvent((event) => {
@@ -525,18 +622,22 @@ async function main() {
               location.reload()
               return
             }
-            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') {
+            if (probeOnly || companionProbe) {
               void copyDiagnostics()
               return
             }
-            void startGeneration(promptFromSelection())
+            if (canChat()) {
+              void startGeneration(promptFromSelection())
+              return
+            }
+            void copyDiagnostics()
           },
           doublePress: () => {
             if (mode === 'thinking') {
               cancelGeneration()
               return
             }
-            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') {
+            if (probeOnly || companionProbe || !canChat()) {
               void copyDiagnostics()
               return
             }
@@ -545,13 +646,13 @@ async function main() {
           },
           swipeUp: () => {
             if (mode === 'thinking') return
-            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') return
+            if (probeOnly || companionProbe || !canChat()) return
             selectedPromptIndex = (selectedPromptIndex - 1 + PROMPTS.length) % PROMPTS.length
             render()
           },
           swipeDown: () => {
             if (mode === 'thinking') return
-            if (probeOnly || companionProbe || envProbe.webgpu.status !== 'supported') return
+            if (probeOnly || companionProbe || !canChat()) return
             selectedPromptIndex = (selectedPromptIndex + 1) % PROMPTS.length
             render()
           },

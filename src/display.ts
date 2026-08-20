@@ -2,7 +2,7 @@ import { phaseLabel, type AppError } from './errors.ts'
 import type { EnvProbeResult } from './env/probe.ts'
 import type { CompanionProbeResult } from './companion/probe.ts'
 
-export const APP_VERSION = '0.0.13'
+export const APP_VERSION = '0.0.15'
 export const TEXT_UPGRADE_MAX = 2000
 
 export type Mode = 'loading' | 'idle' | 'thinking' | 'error'
@@ -84,12 +84,17 @@ export function formatHubText(state: DisplayState): string {
     }
   }
 
-  if (state.mode === 'idle' && env.webgpu.status === 'supported' && !state.probeOnly && !state.companionProbe) {
+  const chatReady =
+    !state.probeOnly &&
+    !state.companionProbe &&
+    (env.webgpu.status === 'supported' || state.modelLabel.includes('omoserv'))
+
+  if (state.mode === 'idle' && chatReady) {
     lines.push(`prompt: ${state.selectedPromptIndex + 1}/${state.promptCount}`)
     lines.push('press: send / double: next')
     lines.push('swipe: prev/next prompt')
   }
-  if (state.mode === 'idle' && (state.probeOnly || state.companionProbe)) {
+  if (state.mode === 'idle' && (state.probeOnly || state.companionProbe || !chatReady)) {
     lines.push('press/double: copy diagnostics')
   }
   if (state.mode === 'thinking') lines.push('press: cancel')

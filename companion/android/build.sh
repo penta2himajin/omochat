@@ -23,7 +23,7 @@ docker run --rm \
       /tmp/gradle-8.7/bin/gradle wrapper --gradle-version 8.7
     fi
     chmod +x gradlew
-    ./gradlew assembleDebug --no-daemon --stacktrace
+    ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
   '
 
 echo "APK: $PWD/app/build/outputs/apk/debug/app-debug.apk"

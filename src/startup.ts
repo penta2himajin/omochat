@@ -1,19 +1,20 @@
 export type StartupOptions = {
   probeOnly: boolean
-  /** When true, skip model load and focus on diagnostics. */
+  /** Diagnostic mode: skip model load and focus on probe output. */
   companionProbe: boolean
-  /** When true, fetch the companion /hello endpoint at startup. */
+  /** When true, fetch omoserv /hello at startup. */
   shouldProbeCompanion: boolean
   skipModelLoad: boolean
 }
 
 /**
- * Resolve startup flags from URL query and host environment.
+ * Resolve startup flags from URL query.
  *
- * - Companion is probed by default on Even Hub (no query param needed).
- * - Pass companionProbe=0 to disable companion fetch on desktop dev.
+ * - omoserv is probed by default (disable with companionProbe=0).
+ * - Diagnostic skip-model mode only with ?companionProbe=1 or ?probeOnly=1
+ *   (Even Hub no longer forces skip — use API config / WebGPU for chat).
  */
-export function resolveStartupOptions(search: string, evenHub: boolean): StartupOptions {
+export function resolveStartupOptions(search: string, _evenHub: boolean): StartupOptions {
   const params = new URLSearchParams(search)
   const probeOnly = params.get('probeOnly') === '1'
   const companionParam = params.get('companionProbe')
@@ -21,7 +22,7 @@ export function resolveStartupOptions(search: string, evenHub: boolean): Startup
   const companionExplicit = companionParam === '1'
 
   const shouldProbeCompanion = !companionDisabled
-  const companionProbe = !companionDisabled && (companionExplicit || probeOnly || evenHub)
+  const companionProbe = !companionDisabled && (companionExplicit || probeOnly)
   const skipModelLoad = probeOnly || companionProbe
 
   return {

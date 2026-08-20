@@ -14,12 +14,38 @@ export type AppError = {
   detail?: string
 }
 
+function messageFromUnknown(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name || 'Error'
+  if (err && typeof err === 'object') {
+    const o = err as { message?: unknown; code?: unknown; status?: unknown }
+    if (typeof o.message === 'string' && o.message.trim()) {
+      const bits = [o.message]
+      if (typeof o.status === 'number') bits.unshift(`HTTP ${o.status}`)
+      if (typeof o.code === 'string' && o.code) bits.push(`(${o.code})`)
+      return bits.join(' ')
+    }
+  }
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
+
 export function formatThrownError(err: unknown, phase: ErrorPhase): AppError {
   if (err instanceof Error) {
     const detail = err.stack?.split('\n').slice(0, 4).join('\n')
-    return { phase, message: err.message || err.name || 'Error', detail }
+    const base: AppError = { phase, message: err.message || err.name || 'Error', detail }
+    if ('status' in err && typeof (err as { status?: unknown }).status === 'number') {
+      const status = (err as { status: number }).status
+      const code = 'code' in err && typeof (err as { code?: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : undefined
+      base.message = code ? `HTTP ${status}: ${base.message} (${code})` : `HTTP ${status}: ${base.message}`
+    }
+    return base
   }
-  return { phase, message: String(err) }
+  return { phase, message: messageFromUnknown(err) }
 }
 
 export function phaseLabel(phase: ErrorPhase): string {
@@ -35,7 +61,7 @@ export function phaseLabel(phase: ErrorPhase): string {
     case 'conversation-create':
       return 'createConversation'
     case 'generation':
-      return 'sendMessageStreaming'
+      return 'chat generation'
     case 'evenhub':
       return 'EvenHub bridge'
     default:

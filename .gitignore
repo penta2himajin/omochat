@@ -10,3 +10,7 @@ companion/android/local.properties
 .DS_Store
 *.log
 
+
+# Local signing keys (do not commit)
+companion/android/*.keystore
+companion/android/*.jks

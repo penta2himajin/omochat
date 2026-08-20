@@ -105,6 +105,12 @@ omochat ehpk: on `401`, prompt to update token in phone settings.
 - `engine.initialize()` on a background thread / coroutine.
 - Single-flight inference scheduler (LLM + future STT).
 
+**APK packaging (16KB page size):** LiteRT-LM ships `liblitertlm_jni.so` with ELF LOAD align 16KB. Build with AGP **≥ 8.5.1** and `packaging.jniLibs.useLegacyPackaging = false` so uncompressed `.so` zip entries are 16KB-aligned. Older AGP (e.g. 8.2.x) triggers Play/compat warnings (“APK alignment check failed” / “uncompressed library does not match”) and can crash on load/inference on devices that enforce 16KB-ready packages.
+
+**Streaming API caveat:** Do **not** use LiteRT-LM’s Flow `sendMessageAsync` overload. Its `callbackFlow` calls `SendChannel.close$default` on the interface, but kotlinx-coroutines ships that helper on `SendChannel.DefaultImpls` → `NoSuchMethodError` at `onDone`. Use the `MessageCallback` overload instead.
+
+**SSE transport:** Do **not** write SSE from the LiteRT JNI callback into `PipedOutputStream`. Client disconnect closes the pipe and an uncaught `IOException: Pipe closed` on the JNI thread kills the process. Enqueue bytes on a thread-safe queue (`SseByteQueue`) and let NanoHTTPD read that stream; never let exceptions escape `MessageCallback`.
+
 ## 5. Authentication
 
 OpenAI-compatible **`Authorization: Bearer <token>`** on all `/v1/*` routes.
@@ -213,9 +219,9 @@ ModelStore · TokenStore
 | Phase | omoserv | omochat ehpk |
 |-------|---------|--------------|
 | **1** ✅ | `/hello`, `/health`, foreground service | omoserv probe, diagnostics |
-| **2a** | Bearer auth, stub `/v1/chat/completions`, minimal phone chat | phone settings, OpenAiClient |
-| **2b** | LiteRT-LM Kotlin, real streaming | glasses chat via omoserv |
-| **2c** | `/v1/models`, model download/cache | connection test |
+| **2a** ✅ | Bearer auth, stub `/v1/chat/completions`, token UI + stub phone chat | phone settings, OpenAiClient |
+| **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E2B), real streaming, model download/load | glasses chat via omoserv |
+| **2c** | polish `/v1/models` metadata | connection test refinements |
 | **3** | `/v1/audio/transcriptions` | STT (future) |
 
 ## 10. Non-goals (Android v1)

@@ -1,6 +1,6 @@
 # omoserv (Android)
 
-On-device AI service for **omochat** on Even G2. LiteRT-LM runtime + OpenAI-compatible HTTP API on `127.0.0.1:8765`.
+On-device AI service for **omochat** on Even G2. LiteRT-LM (Gemma 4 E2B) + OpenAI-compatible HTTP API on `127.0.0.1:8765`.
 
 **Design spec:** [docs/design.md](./docs/design.md)
 
@@ -9,9 +9,14 @@ On-device AI service for **omochat** on Even G2. LiteRT-LM runtime + OpenAI-comp
 | App | Role |
 |-----|------|
 | **omochat** | Even G2 plugin — chat on glasses, settings on phone |
-| **omoserv** | Android app — local inference + API (+ minimal phone chat, Phase 2+) |
+| **omoserv** | Android app — local LiteRT-LM + API + phone chat |
 
-Phase 1: `GET /hello` → `Hello, world`.
+## First-run (model)
+
+1. Install/start omoserv.
+2. Tap **Download model** (~2.5 GB, Wi‑Fi recommended).
+3. Tap **Load model into memory** (GPU preferred, CPU fallback).
+4. Copy API URL + token into omochat phone settings.
 
 ## Build (OrbStack / Docker)
 
@@ -32,17 +37,15 @@ adb shell am start -n com.penta2himajin.omochat.companion/.MainActivity
 
 Keep the foreground notification active (HTTP server on port **8765**).
 
-## Test from omochat ehpk
+## Endpoints
 
-1. Pack/install omochat with `http://127.0.0.1:8765` in `app.json` network whitelist.
-2. Start omoserv on the phone.
-3. Open omochat on glasses — diagnostics show `omoserv: ok`.
+| Path | Auth | Response |
+|------|------|----------|
+| `GET /hello` | No | `Hello, world` |
+| `GET /health` | No | service + model/llm ready flags |
+| `GET /v1/models` | Bearer | `gemma-4-e2b` |
+| `POST /v1/chat/completions` | Bearer | LiteRT-LM chat (JSON or SSE) |
 
-## Endpoints (Phase 1)
-
-| Path | Response |
-|------|----------|
-| `GET /hello` | `Hello, world` (text/plain) |
-| `GET /health` | `{"ok":true,"service":"omoserv"}` |
+Bind: `127.0.0.1:8765` only.
 
 All responses include CORS headers (`Access-Control-Allow-Origin: *`).

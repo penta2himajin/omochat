@@ -1,3 +1,20 @@
 <resources>
     <string name="app_name">omoserv</string>
+    <string name="subtitle">Local AI for omochat (LiteRT-LM)</string>
+    <string name="label_model">Model (Gemma 4 E2B · ~2.5 GB)</string>
+    <string name="download_model">Download model</string>
+    <string name="load_model">Load model into memory</string>
+    <string name="label_api_url">API Base URL</string>
+    <string name="label_api_token">API Token</string>
+    <string name="copy_url">Copy URL</string>
+    <string name="copy_token">Copy token</string>
+    <string name="regenerate_token">Regenerate</string>
+    <string name="regenerate_title">Regenerate API token?</string>
+    <string name="regenerate_message">Regenerating the API token will invalidate the current token. All clients (including omochat on your glasses) will stop working until you register the new token. Continue?</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm_regenerate">Regenerate</string>
+    <string name="label_stub_chat">Chat (same /v1 API)</string>
+    <string name="chat_hint">Message…</string>
+    <string name="chat_send">Send</string>
+    <string name="copied">Copied</string>
 </resources>

@@ -1,7 +1,19 @@
 package com.penta2himajin.omochat.companion
 
 object CompanionConfig {
-    const val HOST = "0.0.0.0"
+    /** Localhost only — do not expose the API on the LAN. */
+    const val HOST = "127.0.0.1"
     const val PORT = 8765
     const val BASE_URL = "http://127.0.0.1:$PORT"
+    const val API_BASE_URL = "$BASE_URL/v1"
+
+    /** OpenAI model id exposed by /v1/models and chat completions. */
+    const val MODEL_ID = "gemma-4-e2b"
+
+    const val MODEL_FILE_NAME = "gemma-4-E2B-it.litertlm"
+    const val MODEL_DOWNLOAD_URL =
+        "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
+
+    const val DEFAULT_SYSTEM =
+        "You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display."
 }
