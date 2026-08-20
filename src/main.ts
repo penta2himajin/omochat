@@ -10,18 +10,17 @@ import {
 import {
   buildMenuItems,
   clamp,
-  contentOffsetFor,
   formatHubText,
   GLASSES_BORDER_WIDTH,
   GLASSES_CANVAS_HEIGHT,
   GLASSES_CANVAS_WIDTH,
   GLASSES_PADDING_LENGTH,
-  paginateHistory,
   type DisplayState,
   type LoadingStep,
   type Mode,
   type ViewMode,
 } from './display.ts'
+import { applyHistoryPageDelta, applyViewModeToggle, fullTextUpgradePayload } from './viewMode.ts'
 import { copyEnvProbe, runEnvProbe, type EnvProbeResult } from './env/probe.ts'
 import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
@@ -233,23 +232,37 @@ async function main() {
   })
 
   const render = () => {
-    const text = formatHubText(display())
-    ui.setChatText(text)
-    ui.setStatus(
-      mode === 'loading'
-        ? `loading (${loadingStep ?? '…'})`
-        : mode === 'idle'
-          ? viewMode === 'history'
-            ? 'history'
-            : 'idle'
-          : mode === 'thinking'
-            ? 'generating…'
-            : error
-              ? `error @ ${error.phase}: ${error.message}`
-              : mode,
-    )
-    hubPaint?.()
+    try {
+      const text = formatHubText(display())
+      ui.setChatText(text)
+      ui.setStatus(
+        mode === 'loading'
+          ? `loading (${loadingStep ?? '…'})`
+          : mode === 'idle'
+            ? viewMode === 'history'
+              ? 'history'
+              : 'idle'
+            : mode === 'thinking'
+              ? 'generating…'
+              : error
+                ? `error @ ${error.phase}: ${error.message}`
+                : mode,
+      )
+      hubPaint?.()
+    } catch (err) {
+      console.error('[omochat] render failed', err)
+    }
   }
+
+  const viewToggleState = () => ({
+    mode,
+    viewMode,
+    chatReady,
+    probeOnly,
+    companionProbe,
+    messages,
+    historyPageIndex,
+  })
 
   const fail = (err: unknown, phase: AppError['phase']) => {
     error =
@@ -365,14 +378,10 @@ async function main() {
   }
 
   const toggleViewMode = () => {
-    if (mode === 'thinking') return
-    if (!chatReady || probeOnly || companionProbe) return
-    if (viewMode === 'selection') {
-      viewMode = 'history'
-      historyPageIndex = Math.max(0, paginateHistory(messages).length - 1)
-    } else {
-      viewMode = 'selection'
-    }
+    const next = applyViewModeToggle(viewToggleState())
+    if (!next) return
+    viewMode = next.viewMode
+    historyPageIndex = next.historyPageIndex
     notice = undefined
     render()
   }
@@ -385,9 +394,9 @@ async function main() {
   }
 
   const moveHistoryPage = (delta: number) => {
-    if (mode !== 'idle' || viewMode !== 'history') return
-    const pages = paginateHistory(messages)
-    historyPageIndex = clamp(historyPageIndex + delta, 0, Math.max(0, pages.length - 1))
+    const next = applyHistoryPageDelta(viewToggleState(), delta)
+    if (!next) return
+    historyPageIndex = next.historyPageIndex
     render()
   }
 
@@ -467,12 +476,7 @@ async function main() {
       hubPaint = () => {
         const content = formatHubText(display())
         void hub.textContainerUpgrade(
-          new TextContainerUpgrade({
-            containerID: CID,
-            containerName: CNAME,
-            contentOffset: contentOffsetFor(viewMode, content),
-            content,
-          }),
+          new TextContainerUpgrade(fullTextUpgradePayload(CID, CNAME, content)),
         )
       }
 

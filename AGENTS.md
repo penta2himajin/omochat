@@ -37,6 +37,7 @@ cargo test  --workspace
 
 ## Development Principles
 
+- Follow TDD (Red → Green → Refactor) for all implementation work. Write a failing test first; do not ship behaviour without a regression test.
 - When packing `omochat.ehpk` for device upload, always bump the patch version in `package.json`, `app.json`, and `src/display.ts` (`APP_VERSION`) together. Even Hub rejects installs if the version is unchanged.
 
 ## Architectural Boundaries

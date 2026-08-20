@@ -24,7 +24,7 @@ export {
   wrapByPixels,
 } from './glassesLayout.ts'
 
-export const APP_VERSION = '0.0.21'
+export const APP_VERSION = '0.0.22'
 /** Total TextContainer budget (Even Hub upgrade limit is ~2000). */
 export const TEXT_UPGRADE_MAX = 2000
 /** Full-width rule under the title; sized to the firmware content box. */
@@ -220,52 +220,72 @@ function turnWrappedLines(turn: ChatMessage[]): string[] {
 }
 
 /**
- * Pack history into page bodies by character budget (Hub TextContainer limit).
- * Multiple turns share a page until the budget is full; overflow continues on the
- * next page ending with … and starting with ….
+ * Pack history into page bodies by glasses line budget (no firmware scrollbar).
+ * Multiple turns share a page until the line budget is full; overflow continues
+ * on the next page ending with … and starting with ….
  * Returns oldest→newest page body strings; empty history → one empty page.
  */
 export function paginateHistory(
   messages: ChatMessage[],
-  maxBodyChars: number = historyBodyMaxChars(),
+  maxBodyLines: number = HISTORY_BODY_MAX_LINES,
 ): string[] {
   if (messages.length === 0) return ['']
 
-  const stream = messages.flatMap((m) => wrapMessageLines(m)).join('\n')
-  if (!stream) return ['']
+  const allLines = messages.flatMap((m) => wrapMessageLines(m))
+  if (allLines.length === 0) return ['']
 
   const pages: string[] = []
-  let offset = 0
+  let index = 0
   let continuation = false
 
-  while (offset < stream.length) {
-    const prefix = continuation ? HISTORY_CONTINUATION_PREFIX : ''
-    const restLen = stream.length - offset
-    if (prefix.length + restLen <= maxBodyChars) {
-      pages.push(prefix + stream.slice(offset))
-      break
+  while (index < allLines.length) {
+    const pageLines: string[] = []
+    const budget = Math.max(1, maxBodyLines)
+
+    while (index < allLines.length && pageLines.length < budget) {
+      let line = allLines[index]!
+      if (pageLines.length === 0 && continuation) {
+        const prefixed = HISTORY_CONTINUATION_PREFIX + line
+        if (getTextWidth(prefixed) <= GLASSES_CONTENT_WIDTH) {
+          line = prefixed
+        } else {
+          // Prefix alone, then keep the original line for the next slot if budget allows.
+          pageLines.push(HISTORY_CONTINUATION_PREFIX)
+          // Don't advance index — reprocess this line without prefix on next iteration
+          // unless budget is exhausted (then it carries to next page).
+          if (pageLines.length >= budget) break
+          continuation = false
+          continue
+        }
+      }
+      pageLines.push(line)
+      index++
+      continuation = false
     }
 
-    // Leave one char for trailing …
-    const budget = maxBodyChars - prefix.length - 1
-    if (budget <= 0) {
-      pages.push((prefix + '…').slice(0, maxBodyChars))
-      break
+    const hasMore = index < allLines.length
+    if (hasMore && pageLines.length > 0) {
+      const last = pageLines[pageLines.length - 1]!.replace(/…$/u, '')
+      // Strip a leading continuation prefix only for measuring base content when re-ellipsisizing
+      const base = last.startsWith(HISTORY_CONTINUATION_PREFIX)
+        ? last.slice(HISTORY_CONTINUATION_PREFIX.length)
+        : last
+      const ellipsis = '…'
+      const prefix = last.startsWith(HISTORY_CONTINUATION_PREFIX) ? HISTORY_CONTINUATION_PREFIX : ''
+      const chars = Array.from(base)
+      let lo = 0
+      let hi = chars.length
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1
+        const candidate = prefix + chars.slice(0, mid).join('') + ellipsis
+        if (getTextWidth(candidate) <= GLASSES_CONTENT_WIDTH) lo = mid
+        else hi = mid - 1
+      }
+      pageLines[pageLines.length - 1] = prefix + chars.slice(0, lo).join('') + ellipsis
     }
 
-    let take = budget
-    const window = stream.slice(offset, offset + take)
-    const lastNl = window.lastIndexOf('\n')
-    // Prefer a line break when it still leaves a useful chunk.
-    if (lastNl > 0 && lastNl >= Math.floor(budget * 0.4)) {
-      take = lastNl
-    }
-    if (take <= 0) take = Math.min(budget, stream.length - offset)
-
-    pages.push(prefix + stream.slice(offset, offset + take) + '…')
-    offset += take
-    if (stream[offset] === '\n') offset += 1
-    continuation = true
+    pages.push(pageLines.join('\n'))
+    continuation = hasMore
   }
 
   return pages.length > 0 ? pages : ['']

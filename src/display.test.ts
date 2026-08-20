@@ -104,15 +104,15 @@ describe('wrapByPixels / clipByPixels (firmware metrics)', () => {
   })
 })
 
-describe('paginateHistory (char budget)', () => {
-  it('packs multiple short turns into one page under the char budget', () => {
+describe('paginateHistory (line budget)', () => {
+  it('packs multiple short turns into one page under the line budget', () => {
     const messages = [
       { role: 'user' as const, content: 'hi' },
       { role: 'assistant' as const, content: 'yo' },
       { role: 'user' as const, content: 'hi2' },
       { role: 'assistant' as const, content: 'yo2' },
     ]
-    const pages = paginateHistory(messages, 500)
+    const pages = paginateHistory(messages, 8)
     expect(pages).toHaveLength(1)
     expect(pages[0]).toContain('You: hi')
     expect(pages[0]).toContain('AI: yo2')
@@ -125,35 +125,44 @@ describe('paginateHistory (char budget)', () => {
         { role: 'user', content: 'q' },
         { role: 'assistant', content: long },
       ],
-      80,
+      3,
     )
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0]!.endsWith('…')).toBe(true)
     expect(pages[1]!.startsWith(HISTORY_CONTINUATION_PREFIX)).toBe(true)
     for (const page of pages) {
-      expect(page.length).toBeLessThanOrEqual(80)
+      expect(page.split('\n').length).toBeLessThanOrEqual(3)
     }
-    const rejoined = pages
-      .map((p, i) => {
-        let s = p
-        if (i > 0) s = s.slice(HISTORY_CONTINUATION_PREFIX.length)
-        if (i < pages.length - 1 && s.endsWith('…')) s = s.slice(0, -1)
-        return s
-      })
-      .join('')
-    expect(rejoined).toContain('You: q')
-    expect(rejoined.replace(/\s/g, '')).toContain(long)
   })
 
   it('empty history yields one empty page', () => {
     expect(paginateHistory([])).toEqual([''])
+  })
+
+  it('each formatted history page fits the glasses viewport (no firmware scroll)', () => {
+    const messages = [
+      { role: 'user' as const, content: 'long please' },
+      { role: 'assistant' as const, content: 'あ'.repeat(400) },
+      { role: 'user' as const, content: 'again' },
+      { role: 'assistant' as const, content: 'い'.repeat(400) },
+    ]
+    const pages = paginateHistory(messages)
+    expect(pages.length).toBeGreaterThan(1)
+    for (let i = 0; i < pages.length; i++) {
+      const text = formatHubText(
+        minimalState({ viewMode: 'history', messages, historyPageIndex: i }),
+      )
+      const measured = measureTextWrap(text, GLASSES_CONTENT_WIDTH)
+      expect(measured.lineCount).toBeLessThanOrEqual(GLASSES_VIEWPORT_LINES)
+      expect(measured.height).toBeLessThanOrEqual(GLASSES_CONTENT_HEIGHT)
+    }
   })
 })
 
 describe('formatHubText selection / history', () => {
   it('renders selection menu with mic stub and full-width rule', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('omochat v0.0.21')
+    expect(text).toContain('omochat v0.0.22')
     expect(text).toContain(TITLE_SEPARATOR)
     expect(text).toContain('▶︎ こんにちは')
     expect(text).toContain('> コード書いて')
@@ -198,7 +207,7 @@ describe('formatHubText selection / history', () => {
   })
 
   it('history mode shows continuation ellipsis on later pages of a long reply', () => {
-    const long = 'x'.repeat(3500)
+    const long = 'あ'.repeat(400)
     const messages = [
       { role: 'user' as const, content: 'long please' },
       { role: 'assistant' as const, content: long },
