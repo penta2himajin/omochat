@@ -51,10 +51,18 @@ class OpenAiSseTest {
     }
 
     @Test
-    fun modelsJson_listsId() {
-        val json = OpenAiSse.modelsJson("gemma-4-e2b")
+    fun modelsJson_listsIdAndReadiness() {
+        val json = OpenAiSse.modelsJson(
+            modelId = "gemma-4-e2b",
+            modelReady = true,
+            llmReady = false,
+            backend = "none",
+        )
         assertTrue(json.contains("gemma-4-e2b"))
         assertTrue(json.contains("\"object\":\"list\""))
+        assertTrue(json.contains("\"model_ready\":true"))
+        assertTrue(json.contains("\"llm_ready\":false"))
+        assertTrue(json.contains("\"backend\":\"none\""))
     }
 }
 

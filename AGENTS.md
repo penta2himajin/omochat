@@ -37,9 +37,7 @@ cargo test  --workspace
 
 ## Development Principles
 
-<!-- Project-specific additions only. Do not restate the common rules below. Examples:
-- "All features touching target-adjacent columns must be registered in LEAK_FEATURES."
-- "Public API changes require an ADR in docs/decisions/." -->
+- When packing `omochat.ehpk` for device upload, always bump the patch version in `package.json`, `app.json`, and `src/display.ts` (`APP_VERSION`) together. Even Hub rejects installs if the version is unchanged.
 
 ## Architectural Boundaries
 

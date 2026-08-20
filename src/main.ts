@@ -1,5 +1,4 @@
 import './style.css'
-import { Backend, Engine, getGlobalLiteRtLm, loadLiteRtLm } from '@litert-lm/core'
 import {
   CreateStartUpPageContainer,
   OsEventTypeList,
@@ -8,11 +7,24 @@ import {
   waitForEvenAppBridge,
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk'
-import { formatHubText, type DisplayState, type LoadingStep, type Mode } from './display.ts'
+import {
+  buildMenuItems,
+  clamp,
+  contentOffsetFor,
+  formatHubText,
+  GLASSES_BORDER_WIDTH,
+  GLASSES_CANVAS_HEIGHT,
+  GLASSES_CANVAS_WIDTH,
+  GLASSES_PADDING_LENGTH,
+  paginateHistory,
+  type DisplayState,
+  type LoadingStep,
+  type Mode,
+  type ViewMode,
+} from './display.ts'
 import { copyEnvProbe, runEnvProbe, type EnvProbeResult } from './env/probe.ts'
 import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
-import { installWebGpuDevice, type WebGpuAvailability } from './webgpu.ts'
 import { resolveStartupOptions } from './startup.ts'
 import { createOpenAiClient, type OpenAiClient } from './openai/client.ts'
 import {
@@ -27,15 +39,16 @@ import { mountPhoneSettings } from './phone-settings.ts'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-const MODEL_URL_GEMMA4_E4B =
-  'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.litertlm'
+const DEFAULT_MODEL = 'gemma-4-e2b'
+const SYSTEM_PROMPT =
+  'You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display.'
 
 const PROMPTS = [
   'こんにちは。短く自己紹介して。',
-  'WebGPUについて、子どもにもわかるように説明して。',
-  '日本の四季の特徴を、各1行で教えて。',
-  '次に何を聞けばいい？おすすめの質問を3つ出して。',
+  '今日の気分転換にいいことを、短く3つ教えて。',
 ]
+
+const MENU_ITEMS = buildMenuItems(PROMPTS)
 
 function evenHubHostPresent(): boolean {
   const w = window as unknown as { flutter_inappwebview?: { callHandler?: unknown } }
@@ -91,14 +104,6 @@ function handleEvenHubInput(
   }
 }
 
-function modelLabelFromUrl(url: string): string {
-  try {
-    return new URL(url).pathname.split('/').pop() ?? url
-  } catch {
-    return url
-  }
-}
-
 function appendToTail(current: string, next: string) {
   return current + next
 }
@@ -109,78 +114,6 @@ function stripThinkBlock(text: string): string {
   const end = text.indexOf('</think>', start)
   if (end < 0) return text.slice(0, start).trim()
   return (text.slice(0, start) + text.slice(end + 8)).trim()
-}
-
-type LmBundle = {
-  engine: { delete: () => Promise<void>; cancel?: () => void }
-  conversation: {
-    cancel?: () => void
-    sendMessageStreaming: (prompt: string) => AsyncIterable<unknown>
-  }
-}
-
-const LITERT_LM_WASM_PATH = '/litert-lm/wasm/'
-
-async function createLmConversation(
-  modelUrl: string,
-  webgpu: WebGpuAvailability,
-  onStep: (step: LoadingStep) => void,
-): Promise<LmBundle> {
-  if (webgpu.status !== 'supported') {
-    throw Object.assign(
-      formatThrownError(new Error(`WebGPU ${webgpu.reason ?? 'unsupported'}: ${webgpu.detail}`), 'webgpu'),
-      { phase: 'webgpu' },
-    )
-  }
-
-  onStep('cdn-import')
-  try {
-    await loadLiteRtLm(LITERT_LM_WASM_PATH)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('already loading') || msg.includes('already loaded')) {
-      // ignore
-    } else {
-      throw Object.assign(formatThrownError(err, 'cdn-import'), { phase: 'cdn-import' })
-    }
-  }
-
-  onStep('engine-create')
-  try {
-    const wasm = getGlobalLiteRtLm().liteRtLmWasm
-    await installWebGpuDevice(wasm, webgpu)
-  } catch (err) {
-    throw Object.assign(formatThrownError(err, 'webgpu'), { phase: 'webgpu' })
-  }
-
-  let engine: LmBundle['engine']
-  try {
-    engine = await Engine.create({
-      model: modelUrl,
-      backend: Backend.GPU_ARTISAN,
-    } as any)
-  } catch (err) {
-    throw Object.assign(formatThrownError(err, 'engine-create'), { phase: 'engine-create' })
-  }
-
-  onStep('conversation-create')
-  try {
-    const conversation = await (engine as unknown as { createConversation: (cfg: unknown) => Promise<LmBundle['conversation']> }).createConversation({
-      preface: {
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display.',
-          },
-        ],
-      },
-    })
-    return { engine, conversation }
-  } catch (err) {
-    await engine.delete().catch(() => {})
-    throw Object.assign(formatThrownError(err, 'conversation-create'), { phase: 'conversation-create' })
-  }
 }
 
 function mountWebUi(root: HTMLElement) {
@@ -236,38 +169,6 @@ function mountWebUi(root: HTMLElement) {
     },
     onSend: (fn: () => void) => sendBtn.addEventListener('click', fn),
     onCopyDiagnostics: (fn: () => void) => copyBtn.addEventListener('click', fn),
-    setSendDisabled: (v: boolean) => {
-      sendBtn.disabled = v
-    },
-  }
-}
-
-function toDisplayState(args: {
-  mode: Mode
-  selectedPromptIndex: number
-  messages: ChatMessage[]
-  streamingTail: string
-  loadingStep?: LoadingStep
-  modelUrl: string
-  env: EnvProbeResult
-  companion: CompanionProbeResult
-  probeOnly: boolean
-  companionProbe: boolean
-  error?: AppError
-}): DisplayState {
-  return {
-    mode: args.mode,
-    selectedPromptIndex: args.selectedPromptIndex,
-    promptCount: PROMPTS.length,
-    messages: args.messages,
-    streamingTail: args.streamingTail,
-    loadingStep: args.loadingStep,
-    env: args.env,
-    companion: args.companion,
-    modelLabel: modelLabelFromUrl(args.modelUrl),
-    probeOnly: args.probeOnly,
-    companionProbe: args.companionProbe,
-    error: args.error,
   }
 }
 
@@ -275,7 +176,6 @@ async function main() {
   const root = document.querySelector('#app')! as HTMLElement
   const ui = mountWebUi(root)
 
-  const userModelUrl = import.meta.env.VITE_MODEL_URL || MODEL_URL_GEMMA4_E4B
   const evenHub = evenHubHostPresent()
   const { probeOnly, companionProbe, shouldProbeCompanion, skipModelLoad } = resolveStartupOptions(
     window.location.search,
@@ -283,17 +183,19 @@ async function main() {
   )
 
   let mode: Mode = 'loading'
+  let viewMode: ViewMode = 'selection'
   let loadingStep: LoadingStep | undefined = 'env-probe'
-  let selectedPromptIndex = 0
+  let selectedMenuIndex = 0
+  let historyPageIndex = 0
   let messages: ChatMessage[] = []
   let streamingTail = ''
+  let notice: string | undefined
   let error: AppError | undefined
 
-  let engine: LmBundle['engine'] | null = null
-  let conversation: LmBundle['conversation'] | null = null
   let openaiClient: OpenAiClient | null = null
-  let apiConfig: OmochatApiConfig | null = null
-  let backendKind: 'webgpu' | 'omoserv' | 'none' = 'none'
+  let preferredModel = DEFAULT_MODEL
+  let modelLabel = '(omoserv: configure API in phone settings)'
+  let chatReady = false
 
   let hubPaint: (() => void) | null = null
   let configStorage: ConfigStorage = browserConfigStorage()
@@ -304,31 +206,31 @@ async function main() {
     crossOriginIsolated: false,
     uaFull: '',
     uad: null,
-    webgl2: false,
-    webglRenderer: null,
-    webgpu: { status: 'unsupported', detail: 'not probed' },
   }
   let companionResult: CompanionProbeResult = {
     status: 'skip',
     url: '',
     detail: 'not probed',
   }
-  let activeModelUrl = userModelUrl
 
-  const display = (): DisplayState =>
-    toDisplayState({
-      mode,
-      selectedPromptIndex,
-      messages,
-      streamingTail,
-      loadingStep,
-      modelUrl: activeModelUrl,
-      env: envProbe,
-      companion: companionResult,
-      probeOnly,
-      companionProbe,
-      error,
-    })
+  const display = (): DisplayState => ({
+    mode,
+    viewMode,
+    selectedMenuIndex,
+    menuItems: MENU_ITEMS,
+    messages,
+    historyPageIndex,
+    streamingTail,
+    loadingStep,
+    env: envProbe,
+    companion: companionResult,
+    modelLabel,
+    chatReady,
+    probeOnly,
+    companionProbe,
+    notice,
+    error,
+  })
 
   const render = () => {
     const text = formatHubText(display())
@@ -337,7 +239,9 @@ async function main() {
       mode === 'loading'
         ? `loading (${loadingStep ?? '…'})`
         : mode === 'idle'
-          ? 'idle'
+          ? viewMode === 'history'
+            ? 'history'
+            : 'idle'
           : mode === 'thinking'
             ? 'generating…'
             : error
@@ -348,8 +252,12 @@ async function main() {
   }
 
   const fail = (err: unknown, phase: AppError['phase']) => {
-    error = err && typeof err === 'object' && 'phase' in err && 'message' in err ? (err as AppError) : formatThrownError(err, phase)
+    error =
+      err && typeof err === 'object' && 'phase' in err && 'message' in err
+        ? (err as AppError)
+        : formatThrownError(err, phase)
     mode = 'error'
+    viewMode = 'selection'
     loadingStep = undefined
     streamingTail = ''
     render()
@@ -361,32 +269,46 @@ async function main() {
     ui.setStatus(ok ? 'diagnostics copied' : 'copy failed')
   }
 
-  const canChat = () => backendKind === 'webgpu' || backendKind === 'omoserv'
+  const applyApiConfig = async (config: OmochatApiConfig | null) => {
+    if (!isApiConfigComplete(config)) {
+      openaiClient = null
+      chatReady = false
+      preferredModel = DEFAULT_MODEL
+      modelLabel = '(omoserv: configure API in phone settings)'
+      render()
+      return
+    }
 
-  const applyApiConfig = (config: OmochatApiConfig | null) => {
-    apiConfig = config
-    if (backendKind === 'webgpu') return
-    if (isApiConfigComplete(config)) {
-      openaiClient = createOpenAiClient(config)
-      backendKind = 'omoserv'
-      activeModelUrl = '(omoserv OpenAI API)'
+    const client = createOpenAiClient(config)
+    openaiClient = client
+    chatReady = true
+    modelLabel = `omoserv · ${preferredModel}`
+
+    try {
+      const health = await client.getHealth()
+      preferredModel = (await client.listModels())[0]?.id ?? DEFAULT_MODEL
+      const bits = [`omoserv · ${preferredModel}`]
+      if (!health.model_ready) bits.push('model not downloaded')
+      else if (!health.llm_ready) bits.push('tap Load model in omoserv')
+      else bits.push(`ready/${health.backend}`)
+      modelLabel = bits.join(' · ')
       if (mode === 'error' && error?.phase === 'companion') {
         error = undefined
         mode = 'idle'
       }
-    } else if (backendKind === 'omoserv') {
-      openaiClient = null
-      backendKind = 'none'
-      activeModelUrl = '(omoserv: configure API in phone settings)'
+    } catch {
+      modelLabel = `omoserv · ${preferredModel}`
     }
     render()
   }
 
   const startGeneration = async (prompt: string) => {
     if (mode === 'thinking') return
-    if (!conversation && !openaiClient) return
+    if (!openaiClient) return
 
+    viewMode = 'selection'
     mode = 'thinking'
+    notice = undefined
     streamingTail = ''
     error = undefined
     render()
@@ -396,57 +318,20 @@ async function main() {
     let lastUiRenderTs = performance.now()
 
     try {
-      if (openaiClient) {
-        const history = messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }))
-        const stream = openaiClient.streamChatCompletion({
-          model: 'gemma-4-e2b',
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display.',
-            },
-            ...history,
-          ],
-        })
-        for await (const chunk of stream) {
-          assistantDraft = appendToTail(assistantDraft, chunk)
-          streamingTail = stripThinkBlock(assistantDraft)
-          const now = performance.now()
-          if (now - lastUiRenderTs > 50) {
-            lastUiRenderTs = now
-            render()
-          }
-          if (mode !== 'thinking') break
+      const history = messages.map((m) => ({ role: m.role, content: m.content }))
+      const stream = openaiClient.streamChatCompletion({
+        model: preferredModel,
+        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
+      })
+      for await (const chunk of stream) {
+        assistantDraft = appendToTail(assistantDraft, chunk)
+        streamingTail = stripThinkBlock(assistantDraft)
+        const now = performance.now()
+        if (now - lastUiRenderTs > 50) {
+          lastUiRenderTs = now
+          render()
         }
-      } else if (conversation) {
-        conversation.cancel?.()
-        const stream = conversation.sendMessageStreaming(prompt)
-        for await (const chunk of stream) {
-          const items = (chunk as { content?: Array<{ type?: string; text?: string }> })?.content
-          if (Array.isArray(items)) {
-            for (const item of items) {
-              if (item?.type === 'text' && typeof item.text === 'string') {
-                assistantDraft = appendToTail(assistantDraft, item.text)
-              } else if (typeof item?.text === 'string') {
-                assistantDraft = appendToTail(assistantDraft, item.text)
-              }
-            }
-          } else if (typeof (chunk as { text?: string })?.text === 'string') {
-            assistantDraft = appendToTail(assistantDraft, (chunk as { text: string }).text)
-          }
-
-          streamingTail = stripThinkBlock(assistantDraft)
-          const now = performance.now()
-          if (now - lastUiRenderTs > 50) {
-            lastUiRenderTs = now
-            render()
-          }
-          if (mode !== 'thinking') break
-        }
+        if (mode !== 'thinking') break
       }
 
       if (mode === 'thinking') {
@@ -464,11 +349,47 @@ async function main() {
     if (mode !== 'thinking') return
     mode = 'idle'
     streamingTail = ''
-    conversation?.cancel?.()
     render()
   }
 
-  const promptFromSelection = () => PROMPTS[Math.max(0, Math.min(PROMPTS.length - 1, selectedPromptIndex))] ?? 'こんにちは。'
+  const activateSelection = () => {
+    const item = MENU_ITEMS[selectedMenuIndex]
+    if (!item) return
+    if (item.kind === 'mic') {
+      notice = 'mic input not implemented'
+      render()
+      return
+    }
+    notice = undefined
+    void startGeneration(item.label)
+  }
+
+  const toggleViewMode = () => {
+    if (mode === 'thinking') return
+    if (!chatReady || probeOnly || companionProbe) return
+    if (viewMode === 'selection') {
+      viewMode = 'history'
+      historyPageIndex = Math.max(0, paginateHistory(messages).length - 1)
+    } else {
+      viewMode = 'selection'
+    }
+    notice = undefined
+    render()
+  }
+
+  const moveMenu = (delta: number) => {
+    if (mode !== 'idle' || viewMode !== 'selection') return
+    selectedMenuIndex = clamp(selectedMenuIndex + delta, 0, MENU_ITEMS.length - 1)
+    notice = undefined
+    render()
+  }
+
+  const moveHistoryPage = (delta: number) => {
+    if (mode !== 'idle' || viewMode !== 'history') return
+    const pages = paginateHistory(messages)
+    historyPageIndex = clamp(historyPageIndex + delta, 0, Math.max(0, pages.length - 1))
+    render()
+  }
 
   ui.onSend(() => {
     const q = ui.getInput()
@@ -481,7 +402,7 @@ async function main() {
   render()
 
   mountPhoneSettings(ui.settingsRoot, configStorage, (cfg) => {
-    applyApiConfig(cfg)
+    void applyApiConfig(cfg)
   })
 
   try {
@@ -501,13 +422,12 @@ async function main() {
     }
 
     if (skipModelLoad) {
-      if (companionProbe) {
-        activeModelUrl = companionResult.status === 'ok'
+      modelLabel = companionProbe
+        ? companionResult.status === 'ok'
           ? '(companionProbe: ok)'
           : '(companionProbe: failed)'
-      } else {
-        activeModelUrl = '(probeOnly: model not loaded)'
-      }
+        : '(probeOnly: chat skipped)'
+      chatReady = false
       loadingStep = 'done'
       mode = companionProbe && companionResult.status === 'fail' ? 'error' : 'idle'
       if (mode === 'error') {
@@ -517,64 +437,41 @@ async function main() {
         )
       }
       render()
-    } else if (envProbe.webgpu.status === 'supported') {
-      activeModelUrl = userModelUrl
-      const created = await createLmConversation(
-        activeModelUrl,
-        envProbe.webgpu,
-        (step) => {
-          loadingStep = step
-          render()
-        },
-      )
-      engine = created.engine
-      conversation = created.conversation
-      openaiClient = null
-      backendKind = 'webgpu'
+    } else {
+      loadingStep = 'api-config'
+      render()
+      const cfg = await loadApiConfig(configStorage)
+      await applyApiConfig(cfg)
       loadingStep = 'done'
       mode = 'idle'
       render()
-    } else {
-      const cfg = await loadApiConfig(configStorage)
-      if (isApiConfigComplete(cfg)) {
-        applyApiConfig(cfg)
-        loadingStep = 'done'
-        mode = 'idle'
-        render()
-      } else {
-        backendKind = 'none'
-        activeModelUrl = '(setup: set omoserv URL/token in phone settings)'
-        loadingStep = 'done'
-        mode = 'idle'
-        render()
-      }
     }
   } catch (err) {
-    fail(err, 'engine-create')
+    fail(err, 'unknown')
   }
 
   if (evenHubHostPresent()) {
     try {
       const hub = await waitForEvenAppBridge()
       configStorage = evenHubConfigStorage(hub)
-      apiConfig = await loadApiConfig(configStorage)
-      if (backendKind !== 'webgpu' && !skipModelLoad) {
-        applyApiConfig(apiConfig)
+      if (!skipModelLoad) {
+        await applyApiConfig(await loadApiConfig(configStorage))
       }
       mountPhoneSettings(ui.settingsRoot, configStorage, (cfg) => {
-        applyApiConfig(cfg)
+        void applyApiConfig(cfg)
       })
 
       const CID = 1
       const CNAME = 'chat'
 
       hubPaint = () => {
+        const content = formatHubText(display())
         void hub.textContainerUpgrade(
           new TextContainerUpgrade({
             containerID: CID,
             containerName: CNAME,
-            contentOffset: 0,
-            content: formatHubText(display()),
+            contentOffset: contentOffsetFor(viewMode, content),
+            content,
           }),
         )
       }
@@ -586,11 +483,11 @@ async function main() {
             new TextContainerProperty({
               xPosition: 0,
               yPosition: 0,
-              width: 576,
-              height: 288,
-              borderWidth: 0,
+              width: GLASSES_CANVAS_WIDTH,
+              height: GLASSES_CANVAS_HEIGHT,
+              borderWidth: GLASSES_BORDER_WIDTH,
               borderColor: 5,
-              paddingLength: 4,
+              paddingLength: GLASSES_PADDING_LENGTH,
               containerID: CID,
               containerName: CNAME,
               content: formatHubText(display()),
@@ -600,7 +497,6 @@ async function main() {
         }),
       )
 
-      // Keep phone settings visible when opened from Even phone app; hide chrome for glasses paint focus.
       hub.onLaunchSource((source) => {
         if (source === 'glassesMenu') {
           ui.settingsRoot.style.display = 'none'
@@ -626,8 +522,10 @@ async function main() {
               void copyDiagnostics()
               return
             }
-            if (canChat()) {
-              void startGeneration(promptFromSelection())
+            // History mode: press is intentionally a no-op.
+            if (viewMode === 'history') return
+            if (chatReady) {
+              activateSelection()
               return
             }
             void copyDiagnostics()
@@ -637,24 +535,29 @@ async function main() {
               cancelGeneration()
               return
             }
-            if (probeOnly || companionProbe || !canChat()) {
+            if (probeOnly || companionProbe) {
               void copyDiagnostics()
               return
             }
-            selectedPromptIndex = (selectedPromptIndex + 1) % PROMPTS.length
-            render()
+            toggleViewMode()
           },
           swipeUp: () => {
             if (mode === 'thinking') return
-            if (probeOnly || companionProbe || !canChat()) return
-            selectedPromptIndex = (selectedPromptIndex - 1 + PROMPTS.length) % PROMPTS.length
-            render()
+            if (viewMode === 'history') {
+              // Older page
+              moveHistoryPage(-1)
+              return
+            }
+            moveMenu(-1)
           },
           swipeDown: () => {
             if (mode === 'thinking') return
-            if (probeOnly || companionProbe || !canChat()) return
-            selectedPromptIndex = (selectedPromptIndex + 1) % PROMPTS.length
-            render()
+            if (viewMode === 'history') {
+              // Newer page
+              moveHistoryPage(1)
+              return
+            }
+            moveMenu(1)
           },
         })
       })
@@ -662,14 +565,6 @@ async function main() {
       fail(err, 'evenhub')
     }
   }
-
-  window.addEventListener('beforeunload', async () => {
-    try {
-      await engine?.delete()
-    } catch {
-      // ignore
-    }
-  })
 }
 
 void main()

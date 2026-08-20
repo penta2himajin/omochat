@@ -14,7 +14,19 @@ describe('createOpenAiClient', () => {
       expect(url).toBe('http://127.0.0.1:8765/v1/models')
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer omoserv_test')
       expect(new Headers(init?.headers).get('Content-Type')).toContain('charset=utf-8')
-      return jsonResponse(200, { object: 'list', data: [{ id: 'gemma-4-e4b', object: 'model' }] })
+      return jsonResponse(200, {
+        object: 'list',
+        data: [
+          {
+            id: 'gemma-4-e2b',
+            object: 'model',
+            owned_by: 'omoserv',
+            model_ready: true,
+            llm_ready: true,
+            backend: 'gpu',
+          },
+        ],
+      })
     }) as unknown as typeof fetch
 
     const client = createOpenAiClient({
@@ -23,7 +35,43 @@ describe('createOpenAiClient', () => {
       fetchImpl,
     })
     const models = await client.listModels()
-    expect(models).toEqual([{ id: 'gemma-4-e4b' }])
+    expect(models).toEqual([
+      {
+        id: 'gemma-4-e2b',
+        owned_by: 'omoserv',
+        model_ready: true,
+        llm_ready: true,
+        backend: 'gpu',
+      },
+    ])
+  })
+
+  it('fetches /health from service root', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(url).toBe('http://127.0.0.1:8765/health')
+      return jsonResponse(200, {
+        ok: true,
+        service: 'omoserv',
+        port: 8765,
+        model_ready: true,
+        llm_ready: false,
+        backend: 'none',
+      })
+    }) as unknown as typeof fetch
+
+    const client = createOpenAiClient({
+      baseUrl: 'http://127.0.0.1:8765/v1',
+      token: 't',
+      fetchImpl,
+    })
+    await expect(client.getHealth()).resolves.toEqual({
+      ok: true,
+      service: 'omoserv',
+      port: 8765,
+      model_ready: true,
+      llm_ready: false,
+      backend: 'none',
+    })
   })
 
   it('throws OpenAiError on 401', async () => {

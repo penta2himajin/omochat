@@ -11,9 +11,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "preserve",
-    "strict": true,
-    "types": ["@webgpu/types"]
+    "strict": true
   },
   "include": ["src"]
 }
-

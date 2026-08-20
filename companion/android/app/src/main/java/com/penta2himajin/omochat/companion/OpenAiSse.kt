@@ -2,8 +2,15 @@ package com.penta2himajin.omochat.companion
 
 /** OpenAI-compatible SSE helpers (ASCII-only JSON). */
 object OpenAiSse {
-    fun modelsJson(modelId: String, ownedBy: String = "omoserv"): String =
-        """{"object":"list","data":[{"id":${JsonAscii.string(modelId)},"object":"model","owned_by":${JsonAscii.string(ownedBy)}}]}"""
+    fun modelsJson(
+        modelId: String,
+        ownedBy: String = "omoserv",
+        created: Long = System.currentTimeMillis() / 1000,
+        modelReady: Boolean,
+        llmReady: Boolean,
+        backend: String,
+    ): String =
+        """{"object":"list","data":[{"id":${JsonAscii.string(modelId)},"object":"model","created":$created,"owned_by":${JsonAscii.string(ownedBy)},"model_ready":$modelReady,"llm_ready":$llmReady,"backend":${JsonAscii.string(backend)}}]}"""
 
     fun nonStreamCompletion(modelId: String, content: String): String {
         val id = "chatcmpl-${System.currentTimeMillis()}"

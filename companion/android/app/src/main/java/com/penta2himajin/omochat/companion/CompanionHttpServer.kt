@@ -30,7 +30,15 @@ class CompanionHttpServer(
                 """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT},"model_ready":${modelStore.isReady()},"llm_ready":${llm.isReady},"backend":${JsonAscii.string(llm.backendLabel)}}""",
             )
             path == "/v1/models" -> requireAuth(session) {
-                json(Response.Status.OK, OpenAiSse.modelsJson(CompanionConfig.MODEL_ID))
+                json(
+                    Response.Status.OK,
+                    OpenAiSse.modelsJson(
+                        modelId = CompanionConfig.MODEL_ID,
+                        modelReady = modelStore.isReady(),
+                        llmReady = llm.isReady,
+                        backend = llm.backendLabel,
+                    ),
+                )
             }
             path == "/v1/chat/completions" -> requireAuth(session) {
                 if (session.method != Method.POST) {

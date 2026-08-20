@@ -6,7 +6,7 @@
 
 | Name | What it is |
 |------|------------|
-| **omochat** | Even G2 plugin (`.ehpk`). Chat UI on glasses; settings on phone WebView. Thin OpenAI HTTP client when WebGPU is unavailable. |
+| **omochat** | Even G2 plugin (`.ehpk`). Chat UI on glasses; settings on phone WebView. Thin OpenAI HTTP client → omoserv. |
 | **omoserv** | Android app. Local LiteRT-LM runtime + minimal OpenAI-compatible HTTP API. Minimal phone chat UI (same API). Powers omochat on glasses. |
 
 ```
@@ -160,13 +160,19 @@ CORS: `Access-Control-Allow-Origin: *`
   "object": "list",
   "data": [
     {
-      "id": "gemma-4-e4b",
+      "id": "gemma-4-e2b",
       "object": "model",
-      "owned_by": "omoserv"
+      "created": 0,
+      "owned_by": "omoserv",
+      "model_ready": true,
+      "llm_ready": false,
+      "backend": "none"
     }
   ]
 }
 ```
+
+`model_ready` / `llm_ready` / `backend` mirror `/health` so clients can surface “Download” / “Load model” guidance after a models list call.
 
 ### 6.4 `POST /v1/chat/completions`
 
@@ -180,7 +186,7 @@ Whisper-compatible multipart; deferred until STT engine is chosen.
 
 ## 7. omochat ehpk client
 
-Thin **OpenAI client only** on the omoserv path:
+Thin **OpenAI HTTP client only** (no in-WebView LiteRT / WebGPU):
 
 ```ts
 type OmochatApiConfig = {
@@ -189,12 +195,14 @@ type OmochatApiConfig = {
 }
 ```
 
+Phone settings: save URL+token; connection test calls `/health` then `/v1/models` and prompts Download/Load when needed.
+Glasses chat: `streamChatCompletion` against omoserv.
+
 **Backend selection:**
 
 ```
-if (webgpu supported)    → in-WebView LiteRT-LM
-else if (api config set) → OpenAiClient → omoserv
-else                     → setup prompt (Even phone app)
+if (api config set) → OpenAiClient → omoserv
+else                → setup prompt (Even phone app)
 ```
 
 Same client type can target external OpenAI-compatible APIs later.
@@ -221,7 +229,7 @@ ModelStore · TokenStore
 | **1** ✅ | `/hello`, `/health`, foreground service | omoserv probe, diagnostics |
 | **2a** ✅ | Bearer auth, stub `/v1/chat/completions`, token UI + stub phone chat | phone settings, OpenAiClient |
 | **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E2B), real streaming, model download/load | glasses chat via omoserv |
-| **2c** | polish `/v1/models` metadata | connection test refinements |
+| **2c** ✅ | polish `/v1/models` metadata (+ readiness) | thin OpenAI-only ehpk; health-aware connection test |
 | **3** | `/v1/audio/transcriptions` | STT (future) |
 
 ## 10. Non-goals (Android v1)

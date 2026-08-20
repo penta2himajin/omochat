@@ -56,6 +56,21 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
 
+/** Derive service root (… without trailing /v1) for /health and /hello. */
+export function serviceRootFromApiBase(baseUrl: string): string {
+  const base = normalizeBaseUrl(baseUrl)
+  return base.endsWith('/v1') ? base.slice(0, -3) : base
+}
+
+export type OmoservHealth = {
+  ok: boolean
+  service?: string
+  port?: number
+  model_ready: boolean
+  llm_ready: boolean
+  backend: string
+}
+
 function authHeaders(token: string): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
@@ -114,19 +129,57 @@ export async function* parseSseChatStream(
   }
 }
 
+export type ModelInfo = {
+  id: string
+  owned_by?: string
+  created?: number
+  model_ready?: boolean
+  llm_ready?: boolean
+  backend?: string
+}
+
 export function createOpenAiClient(config: OpenAiClientConfig) {
   const baseUrl = normalizeBaseUrl(config.baseUrl)
+  const serviceRoot = serviceRootFromApiBase(baseUrl)
   const fetchImpl = config.fetchImpl ?? fetch
 
   return {
-    async listModels(): Promise<{ id: string }[]> {
+    async getHealth(): Promise<OmoservHealth> {
+      let res: Response
+      try {
+        res = await fetchImpl(`${serviceRoot}/health`, { method: 'GET' })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'network error'
+        throw new OpenAiClientError(0, message, 'network_error')
+      }
+      if (!res.ok) throw await readError(res)
+      const body = (await res.json()) as Partial<OmoservHealth>
+      return {
+        ok: body.ok === true,
+        service: body.service,
+        port: body.port,
+        model_ready: body.model_ready === true,
+        llm_ready: body.llm_ready === true,
+        backend: typeof body.backend === 'string' ? body.backend : 'unknown',
+      }
+    },
+
+    async listModels(): Promise<ModelInfo[]> {
       const res = await fetchImpl(`${baseUrl}/models`, {
         method: 'GET',
         headers: authHeaders(config.token),
       })
       if (!res.ok) throw await readError(res)
-      const body = (await res.json()) as { data?: Array<{ id: string }> }
-      return (body.data ?? []).map((m) => ({ id: m.id }))
+      const body = (await res.json()) as { data?: ModelInfo[] }
+      return (body.data ?? []).map((m) => {
+        const info: ModelInfo = { id: m.id }
+        if (m.owned_by !== undefined) info.owned_by = m.owned_by
+        if (m.created !== undefined) info.created = m.created
+        if (m.model_ready !== undefined) info.model_ready = m.model_ready
+        if (m.llm_ready !== undefined) info.llm_ready = m.llm_ready
+        if (m.backend !== undefined) info.backend = m.backend
+        return info
+      })
     },
 
     async createChatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResponse> {

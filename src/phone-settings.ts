@@ -67,8 +67,19 @@ export function mountPhoneSettings(
       status.textContent = 'テスト中…'
       try {
         const client = createOpenAiClient(config)
+        const health = await client.getHealth()
         const models = await client.listModels()
-        status.textContent = `OK: ${models.map((m) => m.id).join(', ') || '(no models)'}`
+        const ids = models.map((m) => m.id).join(', ') || '(no models)'
+        const lines = [
+          `OK · models: ${ids}`,
+          `health: model_ready=${health.model_ready} llm_ready=${health.llm_ready} backend=${health.backend}`,
+        ]
+        if (!health.model_ready) {
+          lines.push('→ omoserv で Download model')
+        } else if (!health.llm_ready) {
+          lines.push('→ omoserv で Load model')
+        }
+        status.textContent = lines.join('\n')
       } catch (err) {
         const msg =
           err && typeof err === 'object' && 'message' in err

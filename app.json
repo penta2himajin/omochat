@@ -1,7 +1,7 @@
 {
   "package_id": "com.penta2himajin.omochat",
   "name": "Omochat",
-  "version": "0.0.15",
+  "version": "0.0.21",
   "edition": "202601",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.13",
@@ -9,11 +9,9 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Download models and reach the local omoserv HTTP API for omochat.",
+      "desc": "Reach the local omoserv HTTP API for omochat.",
       "whitelist": [
-        "http://127.0.0.1:8765",
-        "https://huggingface.co",
-        "https://cdn-lfs.huggingface.co"
+        "http://127.0.0.1:8765"
       ]
     }
   ],
