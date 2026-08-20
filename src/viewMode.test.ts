@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { measureTextWrap } from '@evenrealities/pretext'
 import {
   formatHubText,
-  GLASSES_CONTENT_HEIGHT,
-  GLASSES_CONTENT_WIDTH,
-  GLASSES_VIEWPORT_LINES,
   buildMenuItems,
   type DisplayState,
 } from './display.ts'
@@ -24,9 +20,9 @@ describe('applyViewModeToggle', () => {
   it('switches selection → history at the last page', () => {
     const messages = [
       { role: 'user' as const, content: 'a' },
-      { role: 'assistant' as const, content: 'あ'.repeat(200) },
+      { role: 'assistant' as const, content: 'あ'.repeat(1500) },
       { role: 'user' as const, content: 'b' },
-      { role: 'assistant' as const, content: 'い'.repeat(200) },
+      { role: 'assistant' as const, content: 'い'.repeat(1500) },
     ]
     const next = applyViewModeToggle({ ...base, messages })
     expect(next).not.toBeNull()
@@ -47,7 +43,7 @@ describe('applyViewModeToggle', () => {
     expect(applyViewModeToggle({ ...base, chatReady: false })).toBeNull()
   })
 
-  it('keeps history pages in viewport after toggle on a long conversation', () => {
+  it('toggles to history on a long conversation and stays under Hub text limit', () => {
     const messages = []
     for (let i = 0; i < 12; i++) {
       messages.push({ role: 'user' as const, content: `q${i}` })
@@ -55,6 +51,7 @@ describe('applyViewModeToggle', () => {
     }
     const next = applyViewModeToggle({ ...base, messages })
     expect(next).not.toBeNull()
+    expect(next!.viewMode).toBe('history')
 
     const menuItems = buildMenuItems(['こんにちは', 'コード書いて'])
     const state: DisplayState = {
@@ -80,9 +77,8 @@ describe('applyViewModeToggle', () => {
       companionProbe: false,
     }
     const text = formatHubText(state)
-    const measured = measureTextWrap(text, GLASSES_CONTENT_WIDTH)
-    expect(measured.lineCount).toBeLessThanOrEqual(GLASSES_VIEWPORT_LINES)
-    expect(measured.height).toBeLessThanOrEqual(GLASSES_CONTENT_HEIGHT)
+    expect(text.length).toBeLessThanOrEqual(2000)
+    expect(text).toContain('history ')
   })
 })
 

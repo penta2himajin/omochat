@@ -16,6 +16,7 @@ import {
   MIC_MENU_ID,
   paginateHistory,
   SELECTION_BODY_MAX_LINES,
+  TEXT_UPGRADE_MAX,
   TITLE_SEPARATOR,
   wrapByPixels,
   type DisplayState,
@@ -104,15 +105,15 @@ describe('wrapByPixels / clipByPixels (firmware metrics)', () => {
   })
 })
 
-describe('paginateHistory (line budget)', () => {
-  it('packs multiple short turns into one page under the line budget', () => {
+describe('paginateHistory (char budget)', () => {
+  it('packs multiple short turns into one page under the char budget', () => {
     const messages = [
       { role: 'user' as const, content: 'hi' },
       { role: 'assistant' as const, content: 'yo' },
       { role: 'user' as const, content: 'hi2' },
       { role: 'assistant' as const, content: 'yo2' },
     ]
-    const pages = paginateHistory(messages, 8)
+    const pages = paginateHistory(messages, 500)
     expect(pages).toHaveLength(1)
     expect(pages[0]).toContain('You: hi')
     expect(pages[0]).toContain('AI: yo2')
@@ -125,26 +126,36 @@ describe('paginateHistory (line budget)', () => {
         { role: 'user', content: 'q' },
         { role: 'assistant', content: long },
       ],
-      3,
+      80,
     )
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0]!.endsWith('…')).toBe(true)
     expect(pages[1]!.startsWith(HISTORY_CONTINUATION_PREFIX)).toBe(true)
     for (const page of pages) {
-      expect(page.split('\n').length).toBeLessThanOrEqual(3)
+      expect(page.length).toBeLessThanOrEqual(80)
     }
+    const rejoined = pages
+      .map((p, i) => {
+        let s = p
+        if (i > 0) s = s.slice(HISTORY_CONTINUATION_PREFIX.length)
+        if (i < pages.length - 1 && s.endsWith('…')) s = s.slice(0, -1)
+        return s
+      })
+      .join('')
+    expect(rejoined).toContain('You: q')
+    expect(rejoined.replace(/\s/g, '')).toContain(long)
   })
 
   it('empty history yields one empty page', () => {
     expect(paginateHistory([])).toEqual([''])
   })
 
-  it('each formatted history page fits the glasses viewport (no firmware scroll)', () => {
+  it('keeps each formatted history page under the Hub text upgrade limit (scroll OK)', () => {
     const messages = [
       { role: 'user' as const, content: 'long please' },
-      { role: 'assistant' as const, content: 'あ'.repeat(400) },
+      { role: 'assistant' as const, content: 'あ'.repeat(2000) },
       { role: 'user' as const, content: 'again' },
-      { role: 'assistant' as const, content: 'い'.repeat(400) },
+      { role: 'assistant' as const, content: 'い'.repeat(2000) },
     ]
     const pages = paginateHistory(messages)
     expect(pages.length).toBeGreaterThan(1)
@@ -152,9 +163,10 @@ describe('paginateHistory (line budget)', () => {
       const text = formatHubText(
         minimalState({ viewMode: 'history', messages, historyPageIndex: i }),
       )
-      const measured = measureTextWrap(text, GLASSES_CONTENT_WIDTH)
-      expect(measured.lineCount).toBeLessThanOrEqual(GLASSES_VIEWPORT_LINES)
-      expect(measured.height).toBeLessThanOrEqual(GLASSES_CONTENT_HEIGHT)
+      expect(text.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
+      for (const line of text.split('\n')) {
+        expect(getTextWidth(line)).toBeLessThanOrEqual(GLASSES_CONTENT_WIDTH)
+      }
     }
   })
 })
@@ -162,7 +174,7 @@ describe('paginateHistory (line budget)', () => {
 describe('formatHubText selection / history', () => {
   it('renders selection menu with mic stub and full-width rule', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('omochat v0.0.22')
+    expect(text).toContain('omochat v0.0.23')
     expect(text).toContain(TITLE_SEPARATOR)
     expect(text).toContain('▶︎ こんにちは')
     expect(text).toContain('> コード書いて')
@@ -207,7 +219,7 @@ describe('formatHubText selection / history', () => {
   })
 
   it('history mode shows continuation ellipsis on later pages of a long reply', () => {
-    const long = 'あ'.repeat(400)
+    const long = 'x'.repeat(3500)
     const messages = [
       { role: 'user' as const, content: 'long please' },
       { role: 'assistant' as const, content: long },
@@ -227,6 +239,8 @@ describe('formatHubText selection / history', () => {
     expect(page0.trimEnd().split('\n').some((l) => l.endsWith('…'))).toBe(true)
     expect(page1).toContain(HISTORY_CONTINUATION_PREFIX)
     expect(page1).toContain(`history 2/${pages.length}`)
+    expect(page0.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
+    expect(page1.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
   })
 
   it('thinking shows cancel, not menu, and stays in viewport', () => {
@@ -261,7 +275,7 @@ describe('formatHubText selection / history', () => {
 })
 
 describe('contentOffsetFor', () => {
-  it('keeps selection and history at offset 0 (fit-on-screen)', () => {
+  it('stays at 0 (upgrades use full replace without contentOffset)', () => {
     expect(contentOffsetFor('history', 'abcdef')).toBe(0)
     expect(contentOffsetFor('selection', 'abcdef')).toBe(0)
   })
