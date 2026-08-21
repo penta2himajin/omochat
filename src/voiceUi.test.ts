@@ -4,6 +4,7 @@ import {
   buildMenuItems,
   formatHubText,
   formatSelectionPanes,
+  GLASSES_CANVAS_HEIGHT,
   MIC_MENU_ID,
   TEXT_COLOR_ASSISTANT,
   TEXT_COLOR_USER,
@@ -113,6 +114,26 @@ describe('textColor roles', () => {
     expect(user?.textColor).toBe(TEXT_COLOR_USER)
     expect(assistant?.textColor).toBe(TEXT_COLOR_ASSISTANT)
     expect(assistant!.textColor).toBeGreaterThan(user!.textColor)
+  })
+
+  it('keeps the event-capture menu pane inside the canvas so double-press works', () => {
+    const panes = formatSelectionPanes(
+      state({
+        messages: [
+          { role: 'user', content: '長い質問です。'.repeat(8) },
+          { role: 'assistant', content: 'あ'.repeat(400) },
+        ],
+        selectedMenuIndex: 0,
+      }),
+    )
+    expect(panes).not.toBeNull()
+    for (const p of panes!) {
+      expect(p.yPosition).toBeGreaterThanOrEqual(0)
+      expect(p.yPosition + p.height).toBeLessThanOrEqual(GLASSES_CANVAS_HEIGHT)
+    }
+    const menu = panes!.find((p) => p.containerName === 'omo-menu')
+    expect(menu?.isEventCapture).toBe(1)
+    expect(menu!.yPosition + menu!.height).toBe(GLASSES_CANVAS_HEIGHT)
   })
 })
 
