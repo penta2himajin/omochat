@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
             app.llm.isReady -> "ready · backend=${app.llm.backendLabel} · ${CompanionConfig.MODEL_ID} · ${mb}MB"
             downloaded -> "downloaded (${mb}MB) · tap Load model"
             downloading -> "downloading…"
-            else -> "not downloaded · needs ~2.5GB free"
+            else -> "not downloaded · needs ~3.0GB free"
         }
         downloadBtn.isEnabled = !downloaded && !downloading
     }

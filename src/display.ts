@@ -5,28 +5,39 @@ import type { CompanionProbeResult } from './companion/probe.ts'
 import {
   buildTitleSeparator,
   clipByPixels,
+  GLASSES_CANVAS_HEIGHT,
+  GLASSES_CANVAS_WIDTH,
   GLASSES_CONTENT_WIDTH,
+  GLASSES_LINE_HEIGHT_PX,
+  GLASSES_PADDING_LENGTH,
   GLASSES_VIEWPORT_LINES,
   wrapByPixels,
 } from './glassesLayout.ts'
 import { takeUtf8Prefix, utf8ByteLength } from './hubPaint.ts'
 import { markdownToPlainGlasses } from './markdownPlain.ts'
+import { marqueeNeeded, marqueeSliceByPixels } from './marquee.ts'
 import {
-  formatVoiceRecordingClock,
-  voiceConfirmMenuItems,
+  MIC_IDLE_LABEL,
+  resolveMenuItemLabel,
   type VoicePhase,
 } from './voiceUi.ts'
 
 export type { VoicePhase } from './voiceUi.ts'
 export {
-  VOICE_CONFIRM_RERECORD_ID,
-  VOICE_CONFIRM_SEND_ID,
+  MIC_IDLE_LABEL,
+  MIC_TRANSCRIBING_LABEL,
   VOICE_MAX_SECONDS,
   VOICE_PCM_MAX_BYTES,
   formatVoiceRecordingClock,
   mergePcmChunks,
-  voiceConfirmMenuItems,
+  micLineLabel,
+  resolveMenuItemLabel,
 } from './voiceUi.ts'
+
+/** Even Hub textColor 0–4. Brighter = more attention on mono green. */
+export const TEXT_COLOR_ASSISTANT = 4
+export const TEXT_COLOR_USER = 2
+export const TEXT_COLOR_CHROME = 4
 
 export {
   GLASSES_BORDER_WIDTH,
@@ -42,7 +53,7 @@ export {
   wrapByPixels,
 } from './glassesLayout.ts'
 
-export const APP_VERSION = '0.1.2'
+export const APP_VERSION = '0.1.3'
 /**
  * Even Hub textContainerUpgrade limit.
  * Device probe (v0.0.24): rejection tracks UTF-8 bytes; utf8=2000 also failed,
@@ -119,12 +130,14 @@ export type DisplayState = {
   /** Index into paginateHistory() page bodies; clamped by formatter. */
   historyPageIndex: number
   streamingTail: string
-  /** Glasses mic flow; `off` uses the normal selection menu. */
+  /** Glasses mic flow on the mic menu row (no full-screen confirm). */
   voicePhase: VoicePhase
-  /** Transcript awaiting confirm (send / re-record). */
+  /** Transcript on the mic row when `voicePhase === 'ready'` (tap to send). */
   voiceTranscript: string
   /** Elapsed seconds while `voicePhase === 'recording'`. */
   voiceRecordingElapsedSec: number
+  /** Grapheme shift for mic-row marquee while `ready` (0 = dwell / ellipsis). */
+  voiceMarqueeShift: number
   loadingStep?: LoadingStep
   env: EnvProbeResult
   companion: CompanionProbeResult
@@ -186,7 +199,7 @@ export function buildMenuItems(prompts: string[]): MenuItem[] {
     ...prompts.map((label, i) => ({ id: `prompt-${i}`, label, kind: 'prompt' as const })),
     {
       id: MIC_MENU_ID,
-      label: '▷ tap: 録音開始',
+      label: MIC_IDLE_LABEL,
       kind: 'mic',
     },
   ]
@@ -400,11 +413,61 @@ export function formatLastTurnPreview(
   return fitLinesWithEllipsis(turnWrappedLines(last), maxLines)
 }
 
-function formatMenu(items: MenuItem[], selectedIndex: number): string[] {
+/** Last turn split by role for multi-color TextContainers. */
+export function formatLastTurnRoleLines(
+  messages: ChatMessage[],
+  streamingTail: string,
+  maxLines: number = SELECTION_BODY_MAX_LINES,
+): { user: string[]; assistant: string[] } {
+  const list =
+    streamingTail.length > 0
+      ? [...messages, { role: 'assistant' as const, content: streamingTail }]
+      : messages
+  const turns = messagesToTurns(list)
+  const last = turns[turns.length - 1]
+  if (!last || last.length === 0) return { user: [], assistant: [] }
+
+  const userMsgs = last.filter((m) => m.role === 'user')
+  const assistantMsgs = last.filter((m) => m.role === 'assistant')
+  const userWrapped = userMsgs.flatMap((m) => wrapMessageLines(m))
+  const assistantWrapped = assistantMsgs.flatMap((m) => wrapMessageLines(m))
+
+  if (userWrapped.length + assistantWrapped.length <= maxLines) {
+    return { user: userWrapped, assistant: assistantWrapped }
+  }
+  // Prefer keeping some assistant lines when the budget is tight.
+  const assistantBudget = Math.min(assistantWrapped.length, Math.max(1, Math.floor(maxLines / 2)))
+  const userBudget = Math.max(0, maxLines - assistantBudget)
+  return {
+    user: fitLinesWithEllipsis(userWrapped, userBudget),
+    assistant: fitLinesWithEllipsis(assistantWrapped, assistantBudget),
+  }
+}
+
+function formatMenu(
+  items: MenuItem[],
+  selectedIndex: number,
+  voice: {
+    voicePhase: VoicePhase
+    voiceTranscript: string
+    voiceRecordingElapsedSec: number
+    voiceMarqueeShift: number
+  },
+): string[] {
   return items.map((item, i) => {
     const mark = i === selectedIndex ? '▶︎ ' : '> '
     const markW = getTextWidth(mark)
-    return mark + clipByPixels(item.label, Math.max(24, GLASSES_CONTENT_WIDTH - markW))
+    const maxPx = Math.max(24, GLASSES_CONTENT_WIDTH - markW)
+    const label = resolveMenuItemLabel(item, voice)
+    if (
+      item.kind === 'mic' &&
+      voice.voicePhase === 'ready' &&
+      voice.voiceMarqueeShift > 0 &&
+      marqueeNeeded(label, maxPx)
+    ) {
+      return mark + marqueeSliceByPixels(label, voice.voiceMarqueeShift, maxPx)
+    }
+    return mark + clipByPixels(label, maxPx)
   })
 }
 
@@ -470,30 +533,12 @@ export function formatHubText(state: DisplayState): string {
     return finalize(lines)
   }
 
-  // selection: last turn only, N-line budget, menu always last (idle).
-  if (state.voicePhase === 'recording') {
-    lines.push(`● 録音中  ${formatVoiceRecordingClock(state.voiceRecordingElapsedSec)}`)
-    lines.push('話してください')
-    lines.push('')
-    lines.push('■ tap: 録音停止')
-    return finalize(lines)
-  }
-
-  if (state.voicePhase === 'transcribing') {
-    lines.push('認識中...')
-    return finalize(lines)
-  }
-
-  if (state.voicePhase === 'confirm') {
-    lines.push('認識結果')
-    const body = fitLinesWithEllipsis(
-      wrapByPixels(state.voiceTranscript.trim() || '(空)'),
-      SELECTION_BODY_MAX_LINES,
-    )
-    lines.push(...body)
-    lines.push('')
-    lines.push(...formatMenu(voiceConfirmMenuItems(), state.selectedMenuIndex))
-    return finalize(lines)
+  // selection: last turn + pinned menu (mic row carries voice state).
+  const voice = {
+    voicePhase: state.voicePhase,
+    voiceTranscript: state.voiceTranscript,
+    voiceRecordingElapsedSec: state.voiceRecordingElapsedSec,
+    voiceMarqueeShift: state.voiceMarqueeShift,
   }
 
   const preview = formatLastTurnPreview(state.messages, state.streamingTail, SELECTION_BODY_MAX_LINES)
@@ -507,7 +552,7 @@ export function formatHubText(state: DisplayState): string {
     lines.push('press: cancel')
   } else {
     if (state.notice) lines.push(clipByPixels(state.notice, GLASSES_CONTENT_WIDTH))
-    lines.push(...formatMenu(state.menuItems, state.selectedMenuIndex))
+    lines.push(...formatMenu(state.menuItems, state.selectedMenuIndex, voice))
   }
 
   return finalize(lines)
@@ -518,6 +563,105 @@ function finalize(lines: string[]): string {
   if (utf8ByteLength(out) <= TEXT_UPGRADE_SAFE_UTF8) return out
   const ellipsis = '…'
   return takeUtf8Prefix(out, TEXT_UPGRADE_SAFE_UTF8 - utf8ByteLength(ellipsis)) + ellipsis
+}
+
+export type HubTextPane = {
+  containerID: number
+  containerName: string
+  xPosition: number
+  yPosition: number
+  width: number
+  height: number
+  content: string
+  textColor: number
+  isEventCapture: number
+  zOrderIndex: number
+}
+
+export const HUB_PANE_HEADER_ID = 1
+export const HUB_PANE_USER_ID = 2
+export const HUB_PANE_ASSISTANT_ID = 3
+export const HUB_PANE_MENU_ID = 4
+
+function paneHeightForLines(lineCount: number): number {
+  return Math.max(GLASSES_LINE_HEIGHT_PX, lineCount * GLASSES_LINE_HEIGHT_PX)
+}
+
+/**
+ * Selection-mode Hub layout: user dimmer, assistant brighter (attention on replies).
+ * History / probe / error keep a single full-canvas pane via {@link formatHubText}.
+ */
+export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null {
+  if (state.probeOnly || state.companionProbe) return null
+  if (state.mode === 'loading' || state.mode === 'error') return null
+  if (!state.chatReady) return null
+  if (state.viewMode === 'history') return null
+
+  const voice = {
+    voicePhase: state.voicePhase,
+    voiceTranscript: state.voiceTranscript,
+    voiceRecordingElapsedSec: state.voiceRecordingElapsedSec,
+    voiceMarqueeShift: state.voiceMarqueeShift,
+  }
+
+  const header = headerLines(APP_VERSION)
+  const roles = formatLastTurnRoleLines(state.messages, state.streamingTail, SELECTION_BODY_MAX_LINES)
+  const menuBlock: string[] = []
+  if (state.mode === 'thinking') {
+    menuBlock.push('generating…', 'press: cancel')
+  } else {
+    if (state.notice) menuBlock.push(clipByPixels(state.notice, GLASSES_CONTENT_WIDTH))
+    menuBlock.push(...formatMenu(state.menuItems, state.selectedMenuIndex, voice))
+  }
+
+  const panes: HubTextPane[] = []
+  let y = 0
+  let z = 1
+
+  const push = (
+    id: number,
+    name: string,
+    lines: string[],
+    textColor: number,
+    capture: number,
+  ) => {
+    if (lines.length === 0) return
+    const height = paneHeightForLines(lines.length)
+    panes.push({
+      containerID: id,
+      containerName: name,
+      xPosition: 0,
+      yPosition: y,
+      width: GLASSES_CANVAS_WIDTH,
+      height,
+      content: finalize(lines),
+      textColor,
+      isEventCapture: capture,
+      zOrderIndex: z++,
+    })
+    y += height
+  }
+
+  push(HUB_PANE_HEADER_ID, 'omo-header', header, TEXT_COLOR_CHROME, 0)
+  push(HUB_PANE_USER_ID, 'omo-user', roles.user, TEXT_COLOR_USER, 0)
+  push(HUB_PANE_ASSISTANT_ID, 'omo-assistant', roles.assistant, TEXT_COLOR_ASSISTANT, 0)
+
+  const menuH = paneHeightForLines(Math.max(1, menuBlock.length))
+  const menuY = Math.max(y, GLASSES_CANVAS_HEIGHT - menuH)
+  panes.push({
+    containerID: HUB_PANE_MENU_ID,
+    containerName: 'omo-menu',
+    xPosition: 0,
+    yPosition: menuY,
+    width: GLASSES_CANVAS_WIDTH,
+    height: menuH,
+    content: finalize(menuBlock),
+    textColor: TEXT_COLOR_CHROME,
+    isEventCapture: 1,
+    zOrderIndex: z,
+  })
+
+  return panes
 }
 
 export function clamp(n: number, min: number, max: number): number {

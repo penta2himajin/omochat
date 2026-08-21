@@ -67,6 +67,7 @@ describe('applyViewModeToggle', () => {
       voicePhase: 'off',
       voiceTranscript: '',
       voiceRecordingElapsedSec: 0,
+      voiceMarqueeShift: 0,
       env: {
         origin: '',
         protocol: '',

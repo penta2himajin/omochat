@@ -48,6 +48,7 @@ function minimalState(overrides: Partial<DisplayState>): DisplayState {
     voicePhase: 'off',
     voiceTranscript: '',
     voiceRecordingElapsedSec: 0,
+    voiceMarqueeShift: 0,
     env: baseEnv,
     companion: { status: 'skip', url: '', detail: 'disabled' },
     modelLabel: 'omoserv · gemma-4-e2b',
@@ -186,11 +187,11 @@ describe('paginateHistory (UTF-8 budget)', () => {
 describe('formatHubText selection / history', () => {
   it('renders selection menu with mic stub and full-width rule', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('omochat v0.1.2')
+    expect(text).toContain('omochat v0.1.3')
     expect(text).toContain(TITLE_SEPARATOR)
     expect(text).toContain('▶︎ 調べ物を手伝って')
     expect(text).toContain('> アイデアが欲しい')
-    expect(text).toContain('▷ tap: 録音開始')
+    expect(text).toContain('long-press: 音声入力')
   })
 
   it('selection mode stays within viewport (no firmware scrollbar)', () => {
@@ -330,7 +331,7 @@ describe('selection fit', () => {
     expect(text).not.toContain('You: first')
     const lines = text.split('\n')
     expect(lines[lines.length - 3]).toMatch(/^▶︎ /)
-    expect(lines[lines.length - 1]).toContain('録音開始')
+    expect(lines[lines.length - 1]).toContain('long-press: 音声入力')
   })
 
   it('selection ellipsizes long replies without history continuation pages', () => {

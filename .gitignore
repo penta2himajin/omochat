@@ -2,6 +2,7 @@ node_modules/
 dist/
 public/litert-lm/
 *.ehpk
+companion/models/
 companion/android/.gradle/
 companion/android/build/
 companion/android/app/build/

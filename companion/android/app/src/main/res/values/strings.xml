@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">omoserv</string>
     <string name="subtitle">Local AI for omochat (LiteRT-LM)</string>
-    <string name="label_model">Model (Gemma 4 E2B · ~2.5 GB)</string>
+    <string name="label_model">Model (Gemma 4 E4B GPU · ~3.0 GB)</string>
     <string name="download_model">Download model</string>
     <string name="load_model">Load model into memory</string>
     <string name="label_api_url">API Base URL</string>
