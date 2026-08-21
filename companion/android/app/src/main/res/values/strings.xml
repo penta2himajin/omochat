@@ -18,4 +18,5 @@
     <string name="chat_send">Send</string>
     <string name="copied">Copied</string>
     <string name="calendar_permission_denied">カレンダー権限がないと予定を読めません</string>
+    <string name="location_permission_denied">位置情報の権限がないと現在地を読めません</string>
 </resources>

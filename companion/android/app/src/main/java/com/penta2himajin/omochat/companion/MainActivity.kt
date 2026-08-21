@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
 
         maybeRequestNotificationPermission()
         maybeRequestCalendarPermission()
+        maybeRequestLocationPermission()
         ensureRecordAudioThenStartService()
 
         findViewById<TextView>(R.id.apiUrl).text = CompanionConfig.API_BASE_URL
@@ -249,6 +250,18 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
             }
+            REQ_LOCATION -> {
+                if (grantResults.none { it == PackageManager.PERMISSION_GRANTED }) {
+                    Toast.makeText(
+                        this,
+                        R.string.location_permission_denied,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    // Promote FGS with location type so tools can receive fixes while serving API.
+                    startCompanionService(refreshForeground = true)
+                }
+            }
         }
     }
 
@@ -279,9 +292,32 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun maybeRequestLocationPermission() {
+        val fine =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val coarse =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            // Already granted (e.g. after reinstall): ensure FGS includes location type.
+            startCompanionService(refreshForeground = true)
+            return
+        }
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ),
+            REQ_LOCATION,
+        )
+    }
+
     companion object {
         private const val REQ_NOTIFICATIONS = 1
         private const val REQ_RECORD_AUDIO = 2
         private const val REQ_CALENDAR = 3
+        private const val REQ_LOCATION = 4
     }
 }

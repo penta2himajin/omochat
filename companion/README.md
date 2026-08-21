@@ -1,6 +1,6 @@
 # omoserv (Android)
 
-On-device AI service for **omochat** on Even G2. LiteRT-LM (Gemma 4 E4B GPU) + OpenAI-compatible HTTP API on `127.0.0.1:8765`, with on-device tools (time, calendar list + details).
+On-device AI service for **omochat** on Even G2. LiteRT-LM (Gemma 4 E4B GPU) + OpenAI-compatible HTTP API on `127.0.0.1:8765`, with on-device tools (time, calendar, location).
 
 **Design spec:** [docs/design.md](./docs/design.md)
 

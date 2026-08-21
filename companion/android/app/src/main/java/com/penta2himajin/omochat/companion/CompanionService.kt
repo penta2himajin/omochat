@@ -79,25 +79,39 @@ class CompanionService : Service() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun hasLocationPermission(): Boolean {
+        val fine =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val coarse =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
     private fun foregroundTypes(): Int {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         if (hasRecordAudio() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        if (hasLocationPermission() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         }
         return types
     }
 
     private fun promoteForeground(text: String) {
         val notification = buildNotification(text)
+        val types = foregroundTypes()
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
             notification,
-            foregroundTypes(),
+            types,
         )
         Log.i(
             TAG,
-            "foreground types=${foregroundTypes()} hasRecordAudio=${hasRecordAudio()}",
+            "foreground types=$types hasRecordAudio=${hasRecordAudio()} hasLocation=${hasLocationPermission()}",
         )
     }
 

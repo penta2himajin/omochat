@@ -10,6 +10,7 @@ object DeviceToolSets {
         return listOf(
             tool(DeviceTimeToolSet()),
             tool(CalendarToolSet(CalendarRepository(appContext))),
+            tool(LocationToolSet(LocationRepository(appContext))),
         )
     }
 }
