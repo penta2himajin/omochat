@@ -4,6 +4,29 @@ export type TextPayloadMetrics = {
   lineCount: number
 }
 
+/**
+ * Even Hub rebuildPageContainer content limit (docs: 1000 characters).
+ * Device probes show rejection tracks UTF-8 bytes the same way as upgrades —
+ * history pages at utf8≈1021 with jsLen≪1000 still fail rebuild.
+ */
+export const TEXT_REBUILD_MAX = 1000
+/** Safe UTF-8 ceiling for rebuild payloads (leave headroom under 1000). */
+export const TEXT_REBUILD_SAFE_UTF8 = 950
+
+/** Clip content so rebuildPageContainer accepts it; full text goes via upgrade. */
+export function clipForRebuild(content: string): string {
+  const ellipsis = '…'
+  let s = content
+  const codePoints = [...s]
+  if (codePoints.length > TEXT_REBUILD_MAX) {
+    s = codePoints.slice(0, TEXT_REBUILD_MAX - 1).join('') + ellipsis
+  }
+  if (utf8ByteLength(s) > TEXT_REBUILD_SAFE_UTF8) {
+    s = takeUtf8Prefix(s, TEXT_REBUILD_SAFE_UTF8 - utf8ByteLength(ellipsis)) + ellipsis
+  }
+  return s
+}
+
 export function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).length
 }

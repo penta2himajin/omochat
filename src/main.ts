@@ -5,6 +5,7 @@ import {
   OsEventTypeList,
   RebuildPageContainer,
   TextContainerProperty,
+  TextContainerUpgrade,
   waitForEvenAppBridge,
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk'
@@ -32,7 +33,7 @@ import {
 import { getTextWidth } from '@evenrealities/pretext'
 import { MARQUEE_DWELL_MS, MARQUEE_TICK_MS, marqueeCycleLen, marqueeNeeded } from './marquee.ts'
 import { applyHistoryPageDelta, applyViewModeToggle } from './viewMode.ts'
-import { formatUpgradeFailureNotice, textPayloadMetrics } from './hubPaint.ts'
+import { clipForRebuild, formatUpgradeFailureNotice, textPayloadMetrics } from './hubPaint.ts'
 import { copyEnvProbe, runEnvProbe, type EnvProbeResult } from './env/probe.ts'
 import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
@@ -729,6 +730,8 @@ async function main() {
         void applyApiConfig(cfg)
       })
 
+      let hubLayout: 'single' | 'panes' = 'single'
+
       const paintToHub = () => {
         hubPaintChain = hubPaintChain
           .catch(() => undefined)
@@ -751,7 +754,7 @@ async function main() {
                           paddingLength: 0,
                           containerID: p.containerID,
                           containerName: p.containerName,
-                          content: p.content,
+                          content: clipForRebuild(p.content),
                           textColor: p.textColor,
                           isEventCapture: p.isEventCapture,
                           zOrderIndex: p.zOrderIndex,
@@ -759,32 +762,52 @@ async function main() {
                     ),
                   }),
                 )
+                if (ok) hubLayout = 'panes'
                 const content = formatHubText(display())
                 const metrics = textPayloadMetrics(content)
                 lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, ok)
                 console.info('[omochat]', lastHubUpgradeNotice)
               } else {
+                // History / loading / error: single full-canvas container.
+                // rebuild max ≈1000 UTF-8; upgrade max ≈2000. Layout switches use a
+                // clipped rebuild seed, then textContainerUpgrade for the full page.
                 const content = formatHubText(display())
                 const metrics = textPayloadMetrics(content)
-                const ok = await hub.rebuildPageContainer(
-                  new RebuildPageContainer({
-                    containerTotalNum: 1,
-                    textObject: [
-                      new TextContainerProperty({
-                        xPosition: 0,
-                        yPosition: 0,
-                        width: GLASSES_CANVAS_WIDTH,
-                        height: GLASSES_CANVAS_HEIGHT,
-                        borderWidth: GLASSES_BORDER_WIDTH,
-                        borderColor: 5,
-                        paddingLength: GLASSES_PADDING_LENGTH,
-                        containerID: 1,
-                        containerName: 'chat',
-                        content,
-                        textColor: TEXT_COLOR_CHROME,
-                        isEventCapture: 1,
-                      }),
-                    ],
+                if (hubLayout !== 'single') {
+                  const rebuildOk = await hub.rebuildPageContainer(
+                    new RebuildPageContainer({
+                      containerTotalNum: 1,
+                      textObject: [
+                        new TextContainerProperty({
+                          xPosition: 0,
+                          yPosition: 0,
+                          width: GLASSES_CANVAS_WIDTH,
+                          height: GLASSES_CANVAS_HEIGHT,
+                          borderWidth: GLASSES_BORDER_WIDTH,
+                          borderColor: 5,
+                          paddingLength: GLASSES_PADDING_LENGTH,
+                          containerID: 1,
+                          containerName: 'chat',
+                          content: clipForRebuild(content),
+                          textColor: TEXT_COLOR_CHROME,
+                          isEventCapture: 1,
+                        }),
+                      ],
+                    }),
+                  )
+                  if (!rebuildOk) {
+                    lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, false)
+                    console.info('[omochat]', lastHubUpgradeNotice)
+                    return
+                  }
+                  hubLayout = 'single'
+                }
+                const ok = await hub.textContainerUpgrade(
+                  new TextContainerUpgrade({
+                    containerID: 1,
+                    containerName: 'chat',
+                    content,
+                    textColor: TEXT_COLOR_CHROME,
                   }),
                 )
                 lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, ok)
@@ -814,13 +837,14 @@ async function main() {
               paddingLength: GLASSES_PADDING_LENGTH,
               containerID: 1,
               containerName: 'chat',
-              content: formatHubText(display()),
+              content: clipForRebuild(formatHubText(display())),
               textColor: TEXT_COLOR_CHROME,
               isEventCapture: 1,
             }),
           ],
         }),
       )
+      hubLayout = 'single'
 
       hub.onLaunchSource((source) => {
         if (source === 'glassesMenu') {

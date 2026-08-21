@@ -53,11 +53,12 @@ export {
   wrapByPixels,
 } from './glassesLayout.ts'
 
-export const APP_VERSION = '0.1.4'
+export const APP_VERSION = '0.1.5'
 /**
  * Even Hub textContainerUpgrade limit.
  * Device probe (v0.0.24): rejection tracks UTF-8 bytes; utf8=2000 also failed,
  * so we stay under TEXT_UPGRADE_SAFE_UTF8.
+ * rebuildPageContainer is tighter (~1000 UTF-8) — see clipForRebuild in hubPaint.ts.
  */
 export const TEXT_UPGRADE_MAX = 2000
 /** Safe UTF-8 byte ceiling for a full formatted TextContainer payload. */

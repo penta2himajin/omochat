@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  clipForRebuild,
   createSerializedHubPainter,
   formatUpgradeFailureNotice,
+  TEXT_REBUILD_MAX,
+  TEXT_REBUILD_SAFE_UTF8,
   textPayloadMetrics,
   takeUtf8Prefix,
   utf8ByteLength,
@@ -38,6 +41,21 @@ describe('formatUpgradeFailureNotice', () => {
     expect(notice).toContain('js=1990')
     expect(notice).toContain('utf8=5500')
     expect(notice).toContain('lines=70')
+  })
+})
+
+describe('clipForRebuild', () => {
+  it('clips CJK history payloads that fit upgrade but exceed rebuild UTF-8 budget', () => {
+    // Matches device failure: hub fail history js=470 utf8=1021
+    const content = 'あ'.repeat(340) + 'x'.repeat(10) // 340*3+10 = 1030 utf8, jsLen=350
+    const metrics = textPayloadMetrics(content)
+    expect(metrics.utf8Len).toBeGreaterThan(TEXT_REBUILD_MAX)
+    expect(metrics.jsLen).toBeLessThan(TEXT_REBUILD_MAX)
+
+    const clipped = clipForRebuild(content)
+    expect(utf8ByteLength(clipped)).toBeLessThanOrEqual(TEXT_REBUILD_SAFE_UTF8)
+    expect([...clipped].length).toBeLessThanOrEqual(TEXT_REBUILD_MAX)
+    expect(clipped.endsWith('…')).toBe(true)
   })
 })
 
