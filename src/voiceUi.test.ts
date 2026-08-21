@@ -3,16 +3,19 @@ import {
   APP_VERSION,
   buildMenuItems,
   formatHubText,
+  formatSelectionPanes,
   MIC_MENU_ID,
+  TEXT_COLOR_ASSISTANT,
+  TEXT_COLOR_USER,
   type DisplayState,
   type MenuItem,
 } from './display.ts'
 import {
-  VOICE_CONFIRM_RERECORD_ID,
-  VOICE_CONFIRM_SEND_ID,
+  MIC_IDLE_LABEL,
+  MIC_TRANSCRIBING_LABEL,
   VOICE_MAX_SECONDS,
   formatVoiceRecordingClock,
-  voiceConfirmMenuItems,
+  micLineLabel,
 } from './voiceUi.ts'
 
 const baseEnv = {
@@ -30,7 +33,7 @@ function state(overrides: Partial<DisplayState> = {}): DisplayState {
   return {
     mode: 'idle',
     viewMode: 'selection',
-    selectedMenuIndex: 0,
+    selectedMenuIndex: 2,
     menuItems,
     messages: [],
     historyPageIndex: 0,
@@ -38,9 +41,10 @@ function state(overrides: Partial<DisplayState> = {}): DisplayState {
     voicePhase: 'off',
     voiceTranscript: '',
     voiceRecordingElapsedSec: 0,
+    voiceMarqueeShift: 0,
     env: baseEnv,
     companion: { status: 'skip', url: '', detail: 'disabled' },
-    modelLabel: 'omoserv · gemma-4-e2b',
+    modelLabel: 'omoserv · gemma-4-e4b',
     chatReady: true,
     probeOnly: false,
     companionProbe: false,
@@ -48,18 +52,31 @@ function state(overrides: Partial<DisplayState> = {}): DisplayState {
   }
 }
 
-describe('voiceConfirmMenuItems', () => {
-  it('offers send and re-record only', () => {
-    const items = voiceConfirmMenuItems()
-    expect(items.map((i) => i.id)).toEqual([VOICE_CONFIRM_SEND_ID, VOICE_CONFIRM_RERECORD_ID])
-    expect(items.every((i) => i.kind === 'prompt')).toBe(true)
+describe('micLineLabel', () => {
+  it('idle / recording / transcribing / ready', () => {
+    expect(micLineLabel({ voicePhase: 'off', voiceTranscript: '', voiceRecordingElapsedSec: 0 })).toBe(
+      MIC_IDLE_LABEL,
+    )
+    expect(
+      micLineLabel({ voicePhase: 'recording', voiceTranscript: '', voiceRecordingElapsedSec: 18 }),
+    ).toBe('● 録音中  0:18 / 0:30')
+    expect(
+      micLineLabel({ voicePhase: 'transcribing', voiceTranscript: '', voiceRecordingElapsedSec: 0 }),
+    ).toBe(MIC_TRANSCRIBING_LABEL)
+    expect(
+      micLineLabel({
+        voicePhase: 'ready',
+        voiceTranscript: '渋谷駅までの行き方を教えて',
+        voiceRecordingElapsedSec: 0,
+      }),
+    ).toBe('渋谷駅までの行き方を教えて')
   })
 })
 
 describe('mic menu label', () => {
-  it('uses glassearch-style start copy', () => {
+  it('uses long-press idle copy', () => {
     const mic = buildMenuItems(['a', 'b']).find((i) => i.id === MIC_MENU_ID)
-    expect(mic?.label).toBe('▷ tap: 録音開始')
+    expect(mic?.label).toBe(MIC_IDLE_LABEL)
   })
 })
 
@@ -73,34 +90,63 @@ describe('formatVoiceRecordingClock', () => {
   })
 })
 
-describe('formatHubText voice phases', () => {
-  it('shows recording chrome instead of the idle menu', () => {
-    const text = formatHubText(state({ voicePhase: 'recording', voiceRecordingElapsedSec: 18 }))
-    expect(text).toContain('● 録音中  0:18 / 0:30')
-    expect(text).toContain('話してください')
-    expect(text).toContain('■ tap: 録音停止')
-    expect(text).not.toContain('▷ tap: 録音開始')
+describe('textColor roles', () => {
+  it('makes assistant brighter than user so replies draw attention', () => {
+    expect(TEXT_COLOR_ASSISTANT).toBeGreaterThan(TEXT_COLOR_USER)
+    expect(TEXT_COLOR_ASSISTANT).toBe(4)
+    expect(TEXT_COLOR_USER).toBe(2)
   })
 
-  it('shows transcribing chrome', () => {
-    const text = formatHubText(state({ voicePhase: 'transcribing' }))
-    expect(text).toContain('認識中...')
-    expect(text).not.toContain('▷ tap: 録音開始')
-  })
-
-  it('shows transcript confirm with send / re-record menu', () => {
-    const text = formatHubText(
+  it('formatSelectionPanes assigns brighter color to assistant pane', () => {
+    const panes = formatSelectionPanes(
       state({
-        voicePhase: 'confirm',
-        voiceTranscript: '渋谷駅までの行き方を教えて',
+        messages: [
+          { role: 'user', content: 'こんにちは' },
+          { role: 'assistant', content: 'はい、どうぞ' },
+        ],
         selectedMenuIndex: 0,
       }),
     )
+    expect(panes).not.toBeNull()
+    const user = panes!.find((p) => p.containerName === 'omo-user')
+    const assistant = panes!.find((p) => p.containerName === 'omo-assistant')
+    expect(user?.textColor).toBe(TEXT_COLOR_USER)
+    expect(assistant?.textColor).toBe(TEXT_COLOR_ASSISTANT)
+    expect(assistant!.textColor).toBeGreaterThan(user!.textColor)
+  })
+})
+
+describe('formatHubText voice phases', () => {
+  it('keeps the suggestion menu and shows recording on the mic row', () => {
+    const text = formatHubText(
+      state({ voicePhase: 'recording', voiceRecordingElapsedSec: 18, selectedMenuIndex: 2 }),
+    )
+    expect(text).toContain('調べ物を手伝って')
+    expect(text).toContain('アイデアが欲しい')
+    expect(text).toContain('● 録音中  0:18 / 0:30')
+    expect(text).not.toContain('話してください')
+    expect(text).not.toContain('■ tap: 録音停止')
+    expect(text).not.toContain(MIC_IDLE_LABEL)
+  })
+
+  it('shows transcribing on the mic row', () => {
+    const text = formatHubText(state({ voicePhase: 'transcribing', selectedMenuIndex: 2 }))
+    expect(text).toContain(MIC_TRANSCRIBING_LABEL)
+    expect(text).toContain('調べ物を手伝って')
+  })
+
+  it('shows transcript on the mic row without confirm chrome', () => {
+    const text = formatHubText(
+      state({
+        voicePhase: 'ready',
+        voiceTranscript: '渋谷駅までの行き方を教えて',
+        selectedMenuIndex: 2,
+      }),
+    )
     expect(text).toContain(`omochat v${APP_VERSION}`)
-    expect(text).toContain('認識結果')
-    expect(text).toContain('渋谷駅までの行き方を教えて')
-    expect(text).toContain('▶︎ このまま送る')
-    expect(text).toContain('> 録り直す')
-    expect(text).not.toContain('▷ tap: 録音開始')
+    expect(text).toContain('▶︎ 渋谷駅までの行き方を教えて')
+    expect(text).not.toContain('認識結果')
+    expect(text).not.toContain('このまま送る')
+    expect(text).not.toContain('録り直す')
   })
 })

@@ -160,7 +160,7 @@ CORS: `Access-Control-Allow-Origin: *`
   "object": "list",
   "data": [
     {
-      "id": "gemma-4-e2b",
+      "id": "gemma-4-e4b",
       "object": "model",
       "created": 0,
       "owned_by": "omoserv",
@@ -242,7 +242,7 @@ ModelStore · TokenStore
 |-------|---------|--------------|
 | **1** ✅ | `/hello`, `/health`, foreground service | omoserv probe, diagnostics |
 | **2a** ✅ | Bearer auth, stub `/v1/chat/completions`, token UI + stub phone chat | phone settings, OpenAiClient |
-| **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E2B), real streaming, model download/load | glasses chat via omoserv |
+| **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E4B GPU), real streaming, model download/load | glasses chat via omoserv |
 | **2c** ✅ | polish `/v1/models` metadata (+ readiness) | thin OpenAI-only ehpk; health-aware connection test |
 | **3** | `/v1/audio/transcriptions` (OS SpeechRecognizer + EXTRA_AUDIO_SOURCE spike) | STT client (mic → POST) |
 

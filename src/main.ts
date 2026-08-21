@@ -3,8 +3,8 @@ import {
   AudioInputSource,
   CreateStartUpPageContainer,
   OsEventTypeList,
+  RebuildPageContainer,
   TextContainerProperty,
-  TextContainerUpgrade,
   waitForEvenAppBridge,
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk'
@@ -12,28 +12,27 @@ import {
   buildMenuItems,
   clamp,
   formatHubText,
+  formatSelectionPanes,
   GLASSES_BORDER_WIDTH,
   GLASSES_CANVAS_HEIGHT,
   GLASSES_CANVAS_WIDTH,
+  GLASSES_CONTENT_WIDTH,
   GLASSES_PADDING_LENGTH,
   MIC_MENU_ID,
-  VOICE_CONFIRM_RERECORD_ID,
-  VOICE_CONFIRM_SEND_ID,
+  TEXT_COLOR_CHROME,
   VOICE_MAX_SECONDS,
   VOICE_PCM_MAX_BYTES,
   mergePcmChunks,
-  voiceConfirmMenuItems,
   type DisplayState,
   type LoadingStep,
   type Mode,
   type ViewMode,
   type VoicePhase,
 } from './display.ts'
-import { applyHistoryPageDelta, applyViewModeToggle, fullTextUpgradePayload } from './viewMode.ts'
-import {
-  createSerializedHubPainter,
-  formatUpgradeFailureNotice,
-} from './hubPaint.ts'
+import { getTextWidth } from '@evenrealities/pretext'
+import { MARQUEE_DWELL_MS, MARQUEE_TICK_MS, marqueeCycleLen, marqueeNeeded } from './marquee.ts'
+import { applyHistoryPageDelta, applyViewModeToggle } from './viewMode.ts'
+import { formatUpgradeFailureNotice, textPayloadMetrics } from './hubPaint.ts'
 import { copyEnvProbe, runEnvProbe, type EnvProbeResult } from './env/probe.ts'
 import { probeCompanion, type CompanionProbeResult } from './companion/probe.ts'
 import { formatThrownError, type AppError } from './errors.ts'
@@ -56,7 +55,7 @@ import { pcmToWav } from './pcmWav.ts'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-const DEFAULT_MODEL = 'gemma-4-e2b'
+const DEFAULT_MODEL = 'gemma-4-e4b'
 const SYSTEM_PROMPT =
   'You are a helpful assistant. Answer in Japanese. Keep responses short and useful for a wearable display.'
 
@@ -73,13 +72,20 @@ function normalizeHubEventType(raw: unknown): OsEventTypeList | undefined {
   if (raw === undefined || raw === null) return undefined
   const parsed = OsEventTypeList.fromJson(raw)
   if (parsed !== undefined) return parsed
-  if (typeof raw === 'number' && raw >= 0 && raw <= 8) return raw as OsEventTypeList
+  if (typeof raw === 'number' && raw >= 0 && raw <= 10) return raw as OsEventTypeList
   return undefined
 }
 
 function handleEvenHubInput(
   event: EvenHubEvent,
-  handlers: { press: () => void; doublePress: () => void; swipeUp: () => void; swipeDown: () => void },
+  handlers: {
+    press: () => void
+    doublePress: () => void
+    swipeUp: () => void
+    swipeDown: () => void
+    longPress: () => void
+    longPressRelease: () => void
+  },
 ) {
   const ev = pickHubInputEvent(event)
   if (!ev) return
@@ -108,6 +114,12 @@ function handleEvenHubInput(
       break
     case OsEventTypeList.SCROLL_TOP_EVENT:
       handlers.swipeUp()
+      break
+    case OsEventTypeList.LONG_PRESS_EVENT:
+      handlers.longPress()
+      break
+    case OsEventTypeList.LONG_PRESS_RELEASE_EVENT:
+      handlers.longPressRelease()
       break
     default:
       break
@@ -206,11 +218,15 @@ async function main() {
   let voicePhase: VoicePhase = 'off'
   let voiceTranscript = ''
   let voiceRecordingElapsedSec = 0
+  let voiceMarqueeShift = 0
   let voiceRecordStartedAt = 0
   let voiceRecordTimer: ReturnType<typeof setInterval> | null = null
+  let voiceMarqueeDwellTimer: ReturnType<typeof setTimeout> | null = null
+  let voiceMarqueeTickTimer: ReturnType<typeof setInterval> | null = null
   let selectedMenuIndexBeforeVoice = 0
   const pcmChunks: Uint8Array[] = []
   let hubRef: Awaited<ReturnType<typeof waitForEvenAppBridge>> | null = null
+  let hubPaintChain: Promise<void> = Promise.resolve()
 
   let openaiClient: OpenAiClient | null = null
   let preferredModel = DEFAULT_MODEL
@@ -245,6 +261,7 @@ async function main() {
     voicePhase,
     voiceTranscript,
     voiceRecordingElapsedSec,
+    voiceMarqueeShift,
     loadingStep,
     env: envProbe,
     companion: companionResult,
@@ -419,6 +436,39 @@ async function main() {
     }
   }
 
+  const stopVoiceMarquee = (reset = true) => {
+    if (voiceMarqueeDwellTimer !== null) clearTimeout(voiceMarqueeDwellTimer)
+    if (voiceMarqueeTickTimer !== null) clearInterval(voiceMarqueeTickTimer)
+    voiceMarqueeDwellTimer = null
+    voiceMarqueeTickTimer = null
+    if (reset) voiceMarqueeShift = 0
+  }
+
+  const armVoiceMarquee = () => {
+    stopVoiceMarquee(true)
+    if (voicePhase !== 'ready') return
+    const title = voiceTranscript.trim()
+    const markW = getTextWidth('▶︎ ')
+    const maxPx = Math.max(24, GLASSES_CONTENT_WIDTH - markW)
+    if (!marqueeNeeded(title, maxPx)) return
+    voiceMarqueeDwellTimer = setTimeout(() => {
+      voiceMarqueeDwellTimer = null
+      if (voicePhase !== 'ready') return
+      voiceMarqueeTickTimer = setInterval(() => {
+        if (voicePhase !== 'ready') {
+          stopVoiceMarquee(true)
+          return
+        }
+        const cycle = marqueeCycleLen(voiceTranscript.trim())
+        voiceMarqueeShift += 1
+        if (voiceMarqueeShift >= cycle) {
+          stopVoiceMarquee(false)
+        }
+        render()
+      }, MARQUEE_TICK_MS)
+    }, MARQUEE_DWELL_MS)
+  }
+
   const stopGlassesMic = async () => {
     const hub = hubRef
     if (!hub) return
@@ -429,8 +479,14 @@ async function main() {
     }
   }
 
+  const micMenuIndex = () => {
+    const idx = menuItems.findIndex((i) => i.id === MIC_MENU_ID || i.kind === 'mic')
+    return idx >= 0 ? idx : menuItems.length - 1
+  }
+
   const resetVoiceToIdle = async (opts?: { notice?: string }) => {
     clearVoiceRecordTimer()
+    stopVoiceMarquee(true)
     voicePhase = 'off'
     voiceTranscript = ''
     voiceRecordingElapsedSec = 0
@@ -443,8 +499,11 @@ async function main() {
 
   const beginRecording = async () => {
     if (!hubRef || !openaiClient || mode !== 'idle') return
+    if (voicePhase === 'recording' || voicePhase === 'transcribing') return
     viewMode = 'selection'
     selectedMenuIndexBeforeVoice = selectedMenuIndex
+    selectedMenuIndex = micMenuIndex()
+    stopVoiceMarquee(true)
     pcmChunks.length = 0
     voiceTranscript = ''
     notice = undefined
@@ -480,6 +539,7 @@ async function main() {
     if (voicePhase !== 'recording') return
     clearVoiceRecordTimer()
     voicePhase = 'transcribing'
+    selectedMenuIndex = micMenuIndex()
     render()
     await stopGlassesMic()
 
@@ -511,11 +571,12 @@ async function main() {
         return
       }
       voiceTranscript = trimmed
-      voicePhase = 'confirm'
+      voicePhase = 'ready'
       voiceRecordingElapsedSec = 0
-      selectedMenuIndex = 0
+      selectedMenuIndex = micMenuIndex()
       notice = undefined
       render()
+      armVoiceMarquee()
     } catch (err) {
       const message = err instanceof Error ? err.message : '認識に失敗しました'
       await resetVoiceToIdle({ notice: message })
@@ -523,36 +584,30 @@ async function main() {
   }
 
   const activateSelection = () => {
-    if (voicePhase === 'recording') {
-      void finishRecordingAndTranscribe()
-      return
-    }
-    if (voicePhase === 'transcribing') return
-    if (voicePhase === 'confirm') {
-      const item = voiceConfirmMenuItems()[selectedMenuIndex]
-      if (!item) return
-      if (item.id === VOICE_CONFIRM_SEND_ID) {
-        const text = voiceTranscript.trim()
-        voicePhase = 'off'
-        voiceTranscript = ''
-        voiceRecordingElapsedSec = 0
-        selectedMenuIndex = clamp(selectedMenuIndexBeforeVoice, 0, menuItems.length - 1)
-        notice = undefined
-        if (text) void startGeneration(text)
-        else render()
-        return
-      }
-      if (item.id === VOICE_CONFIRM_RERECORD_ID) {
-        void beginRecording()
-      }
-      return
-    }
+    if (voicePhase === 'recording' || voicePhase === 'transcribing') return
 
     const item = menuItems[selectedMenuIndex]
     if (!item) return
+
     if (item.kind === 'mic' || item.id === MIC_MENU_ID) {
-      void beginRecording()
+      if (voicePhase === 'ready') {
+        const text = voiceTranscript.trim()
+        stopVoiceMarquee(true)
+        voicePhase = 'off'
+        voiceTranscript = ''
+        voiceRecordingElapsedSec = 0
+        notice = undefined
+        if (text) void startGeneration(text)
+        else render()
+      }
+      // idle mic: tap does nothing (long-press to record)
       return
+    }
+
+    if (voicePhase === 'ready') {
+      stopVoiceMarquee(true)
+      voicePhase = 'off'
+      voiceTranscript = ''
     }
     notice = undefined
     void startGeneration(item.label)
@@ -574,16 +629,26 @@ async function main() {
   const moveMenu = (delta: number) => {
     if (mode !== 'idle' || viewMode !== 'selection') return
     if (voicePhase === 'recording' || voicePhase === 'transcribing') return
-    if (voicePhase === 'confirm') {
-      const n = voiceConfirmMenuItems().length
-      selectedMenuIndex = clamp(selectedMenuIndex + delta, 0, n - 1)
-      notice = undefined
-      render()
-      return
-    }
     selectedMenuIndex = clamp(selectedMenuIndex + delta, 0, menuItems.length - 1)
     notice = undefined
+    const onMic = menuItems[selectedMenuIndex]?.kind === 'mic'
+    if (voicePhase === 'ready') {
+      if (onMic) armVoiceMarquee()
+      else stopVoiceMarquee(true)
+    }
     render()
+  }
+
+  const onLongPress = () => {
+    if (mode !== 'idle' || viewMode !== 'selection') return
+    if (!chatReady) return
+    void beginRecording()
+  }
+
+  const onLongPressRelease = () => {
+    if (voicePhase === 'recording') {
+      void finishRecordingAndTranscribe()
+    }
   }
 
   const moveHistoryPage = (delta: number) => {
@@ -664,23 +729,76 @@ async function main() {
         void applyApiConfig(cfg)
       })
 
-      const CID = 1
-      const CNAME = 'chat'
-
-      const painter = createSerializedHubPainter({
-        formatContent: () => formatHubText(display()),
-        upgrade: async (content) =>
-          hub.textContainerUpgrade(new TextContainerUpgrade(fullTextUpgradePayload(CID, CNAME, content))),
-        onResult: ({ ok, metrics, error: upgradeError }) => {
-          const line = formatUpgradeFailureNotice(viewMode, metrics, ok)
-          console.info('[omochat]', line, upgradeError ?? '')
-          // Always keep the latest metrics on the phone preview during this probe build.
-          lastHubUpgradeNotice = line
-          ui.setStatus(line)
-          ui.setChatText(`${formatHubText(display())}\n\n${line}`)
-        },
-      })
-      hubPaint = painter.paint
+      const paintToHub = () => {
+        hubPaintChain = hubPaintChain
+          .catch(() => undefined)
+          .then(async () => {
+            const panes = formatSelectionPanes(display())
+            try {
+              if (panes && panes.length > 0) {
+                const ok = await hub.rebuildPageContainer(
+                  new RebuildPageContainer({
+                    containerTotalNum: panes.length,
+                    textObject: panes.map(
+                      (p) =>
+                        new TextContainerProperty({
+                          xPosition: p.xPosition,
+                          yPosition: p.yPosition,
+                          width: p.width,
+                          height: p.height,
+                          borderWidth: GLASSES_BORDER_WIDTH,
+                          borderColor: 5,
+                          paddingLength: 0,
+                          containerID: p.containerID,
+                          containerName: p.containerName,
+                          content: p.content,
+                          textColor: p.textColor,
+                          isEventCapture: p.isEventCapture,
+                          zOrderIndex: p.zOrderIndex,
+                        }),
+                    ),
+                  }),
+                )
+                const content = formatHubText(display())
+                const metrics = textPayloadMetrics(content)
+                lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, ok)
+                console.info('[omochat]', lastHubUpgradeNotice)
+              } else {
+                const content = formatHubText(display())
+                const metrics = textPayloadMetrics(content)
+                const ok = await hub.rebuildPageContainer(
+                  new RebuildPageContainer({
+                    containerTotalNum: 1,
+                    textObject: [
+                      new TextContainerProperty({
+                        xPosition: 0,
+                        yPosition: 0,
+                        width: GLASSES_CANVAS_WIDTH,
+                        height: GLASSES_CANVAS_HEIGHT,
+                        borderWidth: GLASSES_BORDER_WIDTH,
+                        borderColor: 5,
+                        paddingLength: GLASSES_PADDING_LENGTH,
+                        containerID: 1,
+                        containerName: 'chat',
+                        content,
+                        textColor: TEXT_COLOR_CHROME,
+                        isEventCapture: 1,
+                      }),
+                    ],
+                  }),
+                )
+                lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, ok)
+                console.info('[omochat]', lastHubUpgradeNotice)
+              }
+            } catch (upgradeError) {
+              const content = formatHubText(display())
+              const metrics = textPayloadMetrics(content)
+              lastHubUpgradeNotice = formatUpgradeFailureNotice(viewMode, metrics, undefined)
+              console.info('[omochat]', lastHubUpgradeNotice, upgradeError)
+            }
+          })
+      }
+      hubPaint = paintToHub
 
       await hub.createStartUpPageContainer(
         new CreateStartUpPageContainer({
@@ -694,9 +812,10 @@ async function main() {
               borderWidth: GLASSES_BORDER_WIDTH,
               borderColor: 5,
               paddingLength: GLASSES_PADDING_LENGTH,
-              containerID: CID,
-              containerName: CNAME,
+              containerID: 1,
+              containerName: 'chat',
               content: formatHubText(display()),
+              textColor: TEXT_COLOR_CHROME,
               isEventCapture: 1,
             }),
           ],
@@ -745,7 +864,6 @@ async function main() {
               void copyDiagnostics()
               return
             }
-            // History mode: press is intentionally a no-op.
             if (viewMode === 'history') return
             if (chatReady) {
               activateSelection()
@@ -768,7 +886,6 @@ async function main() {
             if (mode === 'thinking') return
             if (voicePhase === 'recording' || voicePhase === 'transcribing') return
             if (viewMode === 'history') {
-              // Older page
               moveHistoryPage(-1)
               return
             }
@@ -778,12 +895,13 @@ async function main() {
             if (mode === 'thinking') return
             if (voicePhase === 'recording' || voicePhase === 'transcribing') return
             if (viewMode === 'history') {
-              // Newer page
               moveHistoryPage(1)
               return
             }
             moveMenu(1)
           },
+          longPress: onLongPress,
+          longPressRelease: onLongPressRelease,
         })
       })
     } catch (err) {
