@@ -69,6 +69,8 @@ export type OmoservHealth = {
   model_ready: boolean
   llm_ready: boolean
   backend: string
+  stt_ready?: boolean
+  stt_backend?: string
 }
 
 function authHeaders(token: string): HeadersInit {
@@ -161,6 +163,8 @@ export function createOpenAiClient(config: OpenAiClientConfig) {
         model_ready: body.model_ready === true,
         llm_ready: body.llm_ready === true,
         backend: typeof body.backend === 'string' ? body.backend : 'unknown',
+        stt_ready: body.stt_ready === true,
+        stt_backend: typeof body.stt_backend === 'string' ? body.stt_backend : undefined,
       }
     },
 
@@ -190,6 +194,28 @@ export function createOpenAiClient(config: OpenAiClientConfig) {
       })
       if (!res.ok) throw await readError(res)
       return (await res.json()) as ChatCompletionResponse
+    },
+
+    /** OpenAI-compatible audio transcriptions (multipart). */
+    async createTranscription(params: {
+      file: Blob
+      filename?: string
+      model?: string
+      language?: string
+    }): Promise<{ text: string }> {
+      const form = new FormData()
+      form.append('file', params.file, params.filename ?? 'audio.wav')
+      form.append('model', params.model ?? 'omoserv-os-stt')
+      if (params.language) form.append('language', params.language)
+
+      const res = await fetchImpl(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.token}` },
+        body: form,
+      })
+      if (!res.ok) throw await readError(res)
+      const body = (await res.json()) as { text?: string }
+      return { text: typeof body.text === 'string' ? body.text : '' }
     },
 
     async *streamChatCompletion(params: ChatCompletionParams): AsyncGenerator<string> {

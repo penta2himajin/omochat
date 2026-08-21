@@ -71,6 +71,8 @@ describe('createOpenAiClient', () => {
       model_ready: true,
       llm_ready: false,
       backend: 'none',
+      stt_ready: false,
+      stt_backend: undefined,
     })
   })
 
@@ -201,6 +203,31 @@ describe('createOpenAiClient', () => {
       code: 'generation_error',
       message: 'generation failed',
     })
+  })
+
+  it('posts multipart transcriptions and returns text', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('http://127.0.0.1:8765/v1/audio/transcriptions')
+      expect(init?.method).toBe('POST')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer t')
+      expect(init?.body).toBeInstanceOf(FormData)
+      const form = init!.body as FormData
+      expect(form.get('model')).toBe('omoserv-os-stt')
+      expect(form.get('language')).toBe('ja')
+      return jsonResponse(200, { text: 'こんにちは' })
+    }) as unknown as typeof fetch
+
+    const client = createOpenAiClient({
+      baseUrl: 'http://127.0.0.1:8765/v1',
+      token: 't',
+      fetchImpl,
+    })
+    await expect(
+      client.createTranscription({
+        file: new Blob([new Uint8Array([1, 0, 2, 0])]),
+        language: 'ja',
+      }),
+    ).resolves.toEqual({ text: 'こんにちは' })
   })
 })
 

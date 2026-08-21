@@ -182,7 +182,21 @@ Stream: SSE, OpenAI-compatible `data: …` lines + `data: [DONE]`.
 
 ### 6.5 `POST /v1/audio/transcriptions` (Phase 3)
 
-Whisper-compatible multipart; deferred until STT engine is chosen.
+OpenAI-compatible multipart transcriptions:
+
+| Field | Notes |
+|-------|--------|
+| `file` | Required. Raw PCM s16le mono 16 kHz (Even G2 / Hub) or PCM WAV with the same format |
+| `model` | Accepted; ignored for routing (`omoserv-os-stt`) |
+| `language` | Optional. `ja` → `ja-JP`, `en` → `en-US` |
+
+Response (default `json`):
+
+```json
+{ "text": "認識結果" }
+```
+
+**Engine (spike):** platform `SpeechRecognizer` with `RecognizerIntent.EXTRA_AUDIO_SOURCE` (PCM pipe at realtime rate). Availability is OEM-dependent; `/health` exposes `stt_ready` / `stt_backend`. Fallback to ML Kit `AudioSource.fromPfd` if OS injection fails on device.
 
 ## 7. omochat ehpk client
 
@@ -217,7 +231,7 @@ OmoservHttpServer
 
 InferenceScheduler
     ├─ LlmEngine → LiteRtLmEngine
-    └─ SttEngine (future)
+    └─ SttEngine → OsSpeechSttEngine (EXTRA_AUDIO_SOURCE spike)
 
 ModelStore · TokenStore
 ```
@@ -230,7 +244,7 @@ ModelStore · TokenStore
 | **2a** ✅ | Bearer auth, stub `/v1/chat/completions`, token UI + stub phone chat | phone settings, OpenAiClient |
 | **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E2B), real streaming, model download/load | glasses chat via omoserv |
 | **2c** ✅ | polish `/v1/models` metadata (+ readiness) | thin OpenAI-only ehpk; health-aware connection test |
-| **3** | `/v1/audio/transcriptions` | STT (future) |
+| **3** | `/v1/audio/transcriptions` (OS SpeechRecognizer + EXTRA_AUDIO_SOURCE spike) | STT client (mic → POST) |
 
 ## 10. Non-goals (Android v1)
 

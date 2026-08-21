@@ -17,11 +17,13 @@ import {
   paginateHistory,
   SELECTION_BODY_MAX_LINES,
   TEXT_UPGRADE_MAX,
+  TEXT_UPGRADE_SAFE_UTF8,
   TITLE_SEPARATOR,
   wrapByPixels,
   type DisplayState,
   type MenuItem,
 } from './display.ts'
+import { textPayloadMetrics, utf8ByteLength } from './hubPaint.ts'
 
 const baseEnv = {
   origin: 'http://127.0.0.1:41791',
@@ -32,7 +34,7 @@ const baseEnv = {
   uad: null,
 }
 
-const menuItems: MenuItem[] = buildMenuItems(['こんにちは', 'コード書いて'])
+const menuItems: MenuItem[] = buildMenuItems(['調べ物を手伝って', 'アイデアが欲しい'])
 
 function minimalState(overrides: Partial<DisplayState>): DisplayState {
   return {
@@ -43,6 +45,9 @@ function minimalState(overrides: Partial<DisplayState>): DisplayState {
     messages: [],
     historyPageIndex: 0,
     streamingTail: '',
+    voicePhase: 'off',
+    voiceTranscript: '',
+    voiceRecordingElapsedSec: 0,
     env: baseEnv,
     companion: { status: 'skip', url: '', detail: 'disabled' },
     modelLabel: 'omoserv · gemma-4-e2b',
@@ -105,8 +110,8 @@ describe('wrapByPixels / clipByPixels (firmware metrics)', () => {
   })
 })
 
-describe('paginateHistory (char budget)', () => {
-  it('packs multiple short turns into one page under the char budget', () => {
+describe('paginateHistory (UTF-8 budget)', () => {
+  it('packs multiple short turns into one page under the byte budget', () => {
     const messages = [
       { role: 'user' as const, content: 'hi' },
       { role: 'assistant' as const, content: 'yo' },
@@ -119,7 +124,7 @@ describe('paginateHistory (char budget)', () => {
     expect(pages[0]).toContain('AI: yo2')
   })
 
-  it('splits overflow across pages with … continuation markers', () => {
+  it('splits a long reply mid-body with … continuation markers', () => {
     const long = 'あ'.repeat(120)
     const pages = paginateHistory(
       [
@@ -132,25 +137,30 @@ describe('paginateHistory (char budget)', () => {
     expect(pages[0]!.endsWith('…')).toBe(true)
     expect(pages[1]!.startsWith(HISTORY_CONTINUATION_PREFIX)).toBe(true)
     for (const page of pages) {
-      expect(page.length).toBeLessThanOrEqual(80)
+      expect(utf8ByteLength(page)).toBeLessThanOrEqual(80)
     }
-    const rejoined = pages
-      .map((p, i) => {
-        let s = p
-        if (i > 0) s = s.slice(HISTORY_CONTINUATION_PREFIX.length)
-        if (i < pages.length - 1 && s.endsWith('…')) s = s.slice(0, -1)
-        return s
-      })
-      .join('')
-    expect(rejoined).toContain('You: q')
-    expect(rejoined.replace(/\s/g, '')).toContain(long)
+  })
+
+  it('does not mark … when the page break falls between complete turns', () => {
+    const messages = [
+      { role: 'user' as const, content: 'first' },
+      { role: 'assistant' as const, content: 'あ'.repeat(40) },
+      { role: 'user' as const, content: 'second' },
+      { role: 'assistant' as const, content: 'い'.repeat(40) },
+    ]
+    // Enough for the first full turn (~136 UTF-8), not both (~274).
+    const pages = paginateHistory(messages, 150)
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[0]!.endsWith('…')).toBe(false)
+    expect(pages[1]!.startsWith(HISTORY_CONTINUATION_PREFIX)).toBe(false)
+    expect(pages[1]).toMatch(/^You: second/)
   })
 
   it('empty history yields one empty page', () => {
     expect(paginateHistory([])).toEqual([''])
   })
 
-  it('keeps each formatted history page under the Hub text upgrade limit (scroll OK)', () => {
+  it('keeps each formatted history page under the safe UTF-8 Hub limit', () => {
     const messages = [
       { role: 'user' as const, content: 'long please' },
       { role: 'assistant' as const, content: 'あ'.repeat(2000) },
@@ -163,7 +173,9 @@ describe('paginateHistory (char budget)', () => {
       const text = formatHubText(
         minimalState({ viewMode: 'history', messages, historyPageIndex: i }),
       )
-      expect(text.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
+      const m = textPayloadMetrics(text)
+      expect(m.utf8Len).toBeLessThanOrEqual(TEXT_UPGRADE_SAFE_UTF8)
+      expect(m.utf8Len).toBeLessThan(TEXT_UPGRADE_MAX)
       for (const line of text.split('\n')) {
         expect(getTextWidth(line)).toBeLessThanOrEqual(GLASSES_CONTENT_WIDTH)
       }
@@ -174,11 +186,11 @@ describe('paginateHistory (char budget)', () => {
 describe('formatHubText selection / history', () => {
   it('renders selection menu with mic stub and full-width rule', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('omochat v0.0.23')
+    expect(text).toContain('omochat v0.1.2')
     expect(text).toContain(TITLE_SEPARATOR)
-    expect(text).toContain('▶︎ こんにちは')
-    expect(text).toContain('> コード書いて')
-    expect(text).toContain('tap: mic input (not implemented)')
+    expect(text).toContain('▶︎ 調べ物を手伝って')
+    expect(text).toContain('> アイデアが欲しい')
+    expect(text).toContain('▷ tap: 録音開始')
   })
 
   it('selection mode stays within viewport (no firmware scrollbar)', () => {
@@ -239,8 +251,8 @@ describe('formatHubText selection / history', () => {
     expect(page0.trimEnd().split('\n').some((l) => l.endsWith('…'))).toBe(true)
     expect(page1).toContain(HISTORY_CONTINUATION_PREFIX)
     expect(page1).toContain(`history 2/${pages.length}`)
-    expect(page0.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
-    expect(page1.length).toBeLessThanOrEqual(TEXT_UPGRADE_MAX)
+    expect(textPayloadMetrics(page0).utf8Len).toBeLessThanOrEqual(TEXT_UPGRADE_SAFE_UTF8)
+    expect(textPayloadMetrics(page1).utf8Len).toBeLessThanOrEqual(TEXT_UPGRADE_SAFE_UTF8)
   })
 
   it('thinking shows cancel, not menu, and stays in viewport', () => {
@@ -318,7 +330,7 @@ describe('selection fit', () => {
     expect(text).not.toContain('You: first')
     const lines = text.split('\n')
     expect(lines[lines.length - 3]).toMatch(/^▶︎ /)
-    expect(lines[lines.length - 1]).toContain('mic input')
+    expect(lines[lines.length - 1]).toContain('録音開始')
   })
 
   it('selection ellipsizes long replies without history continuation pages', () => {

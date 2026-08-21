@@ -33,10 +33,7 @@ class MainActivity : AppCompatActivity() {
         app = application as OmoservApp
 
         maybeRequestNotificationPermission()
-        ContextCompat.startForegroundService(
-            this,
-            Intent(this, CompanionService::class.java),
-        )
+        ensureRecordAudioThenStartService()
 
         findViewById<TextView>(R.id.apiUrl).text = CompanionConfig.API_BASE_URL
         refreshTokenView()
@@ -203,6 +200,45 @@ class MainActivity : AppCompatActivity() {
     private fun jsonEscape(s: String): String =
         "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+    private fun ensureRecordAudioThenStartService() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startCompanionService(refreshForeground = true)
+            return
+        }
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            REQ_RECORD_AUDIO,
+        )
+        // Start with dataSync-only until mic is granted; refresh after the grant.
+        startCompanionService(refreshForeground = false)
+    }
+
+    private fun startCompanionService(refreshForeground: Boolean) {
+        val intent = Intent(this, CompanionService::class.java)
+        if (refreshForeground) {
+            intent.action = CompanionService.ACTION_REFRESH_FOREGROUND
+        }
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_RECORD_AUDIO) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            startCompanionService(refreshForeground = true)
+        } else {
+            Toast.makeText(this, "マイク権限がないと音声認識できません", Toast.LENGTH_LONG).show()
+            startCompanionService(refreshForeground = false)
+        }
+    }
+
     private fun maybeRequestNotificationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -213,7 +249,12 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-            1,
+            REQ_NOTIFICATIONS,
         )
+    }
+
+    companion object {
+        private const val REQ_NOTIFICATIONS = 1
+        private const val REQ_RECORD_AUDIO = 2
     }
 }

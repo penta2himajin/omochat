@@ -45,6 +45,7 @@ Keep the foreground notification active (HTTP server on port **8765**).
 | `GET /health` | No | service + model/llm ready flags |
 | `GET /v1/models` | Bearer | `gemma-4-e2b` |
 | `POST /v1/chat/completions` | Bearer | LiteRT-LM chat (JSON or SSE) |
+| `POST /v1/audio/transcriptions` | Bearer | OS SpeechRecognizer STT (PCM/WAV → `{text}`) |
 
 Bind: `127.0.0.1:8765` only.
 

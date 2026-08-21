@@ -28,6 +28,9 @@ object OpenAiSse {
         return """{"id":${JsonAscii.string(id)},"object":"chat.completion.chunk","choices":[{"index":0,"delta":$delta,"finish_reason":$finishJson}]}"""
     }
 
+    fun transcriptionJson(text: String): String =
+        """{"text":${JsonAscii.string(text)}}"""
+
     fun errorJson(message: String, code: String): String =
         """{"error":{"message":${JsonAscii.string(message)},"type":"invalid_request_error","code":${JsonAscii.string(code)}}}"""
 }

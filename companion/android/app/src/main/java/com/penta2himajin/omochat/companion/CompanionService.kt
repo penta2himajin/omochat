@@ -1,13 +1,20 @@
 package com.penta2himajin.omochat.companion
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
 
 class CompanionService : Service() {
@@ -20,11 +27,15 @@ class CompanionService : Service() {
         val app = application as OmoservApp
 
         ensureChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("starting…"))
+        promoteForeground("starting…")
+
+        // Debug installs only are signed with the shared debug keystore; log token for adb spikes.
+        Log.i(TAG, "debug token=${app.tokenStore.current()}")
 
         server = CompanionHttpServer(
             tokenStore = app.tokenStore,
             llm = app.llm,
+            stt = OsSpeechSttEngine(applicationContext),
             scheduler = app.scheduler,
             modelStore = app.modelStore,
         ).also {
@@ -48,6 +59,10 @@ class CompanionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Re-enter foreground with microphone type after RECORD_AUDIO is granted.
+        if (intent?.action == ACTION_REFRESH_FOREGROUND) {
+            promoteForeground("listening on ${CompanionConfig.API_BASE_URL}")
+        }
         return START_STICKY
     }
 
@@ -59,6 +74,32 @@ class CompanionService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun hasRecordAudio(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun foregroundTypes(): Int {
+        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        if (hasRecordAudio() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return types
+    }
+
+    private fun promoteForeground(text: String) {
+        val notification = buildNotification(text)
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            foregroundTypes(),
+        )
+        Log.i(
+            TAG,
+            "foreground types=${foregroundTypes()} hasRecordAudio=${hasRecordAudio()}",
+        )
+    }
 
     private fun notifyText(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
@@ -92,8 +133,10 @@ class CompanionService : Service() {
     }
 
     companion object {
+        private const val TAG = "omoserv"
         private const val CHANNEL_ID = "omoserv"
         private const val NOTIFICATION_ID = 8765
         private const val SOCKET_READ_TIMEOUT = 120_000
+        const val ACTION_REFRESH_FOREGROUND = "com.penta2himajin.omochat.companion.REFRESH_FOREGROUND"
     }
 }

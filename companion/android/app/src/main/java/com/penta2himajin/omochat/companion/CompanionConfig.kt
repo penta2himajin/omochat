@@ -10,6 +10,9 @@ object CompanionConfig {
     /** OpenAI model id exposed by /v1/models and chat completions. */
     const val MODEL_ID = "gemma-4-e2b"
 
+    /** OpenAI-compatible transcriptions model id (OS SpeechRecognizer spike). */
+    const val STT_MODEL_ID = "omoserv-os-stt"
+
     const val MODEL_FILE_NAME = "gemma-4-E2B-it.litertlm"
     const val MODEL_DOWNLOAD_URL =
         "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"

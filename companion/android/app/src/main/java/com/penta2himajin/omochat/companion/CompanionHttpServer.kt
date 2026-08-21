@@ -8,6 +8,7 @@ import java.util.concurrent.Executors
 class CompanionHttpServer(
     private val tokenStore: TokenStore,
     private val llm: LlmEngine,
+    private val stt: SttEngine,
     private val scheduler: InferenceScheduler,
     private val modelStore: ModelStore,
 ) : NanoHTTPD(CompanionConfig.HOST, CompanionConfig.PORT) {
@@ -27,7 +28,7 @@ class CompanionHttpServer(
             )
             path == "/health" -> json(
                 Response.Status.OK,
-                """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT},"model_ready":${modelStore.isReady()},"llm_ready":${llm.isReady},"backend":${JsonAscii.string(llm.backendLabel)}}""",
+                """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT},"model_ready":${modelStore.isReady()},"llm_ready":${llm.isReady},"backend":${JsonAscii.string(llm.backendLabel)},"stt_ready":${stt.isAvailable},"stt_backend":${JsonAscii.string(stt.backendLabel)}}""",
             )
             path == "/v1/models" -> requireAuth(session) {
                 json(
@@ -45,6 +46,12 @@ class CompanionHttpServer(
                     return@requireAuth jsonError(Response.Status.METHOD_NOT_ALLOWED, "Method not allowed", "method_not_allowed")
                 }
                 handleChatCompletions(session)
+            }
+            path == "/v1/audio/transcriptions" -> requireAuth(session) {
+                if (session.method != Method.POST) {
+                    return@requireAuth jsonError(Response.Status.METHOD_NOT_ALLOWED, "Method not allowed", "method_not_allowed")
+                }
+                handleTranscriptions(session)
             }
             else -> withCors(
                 newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "not found"),
@@ -113,6 +120,64 @@ class CompanionHttpServer(
         ).also {
             it.addHeader("Cache-Control", "no-cache")
             it.addHeader("Connection", "keep-alive")
+        }
+    }
+
+    private fun handleTranscriptions(session: IHTTPSession): Response {
+        if (!stt.isAvailable) {
+            return jsonError(
+                Response.Status.SERVICE_UNAVAILABLE,
+                "Speech recognition unavailable on this device",
+                "stt_unavailable",
+            )
+        }
+
+        val files = HashMap<String, String>()
+        try {
+            session.parseBody(files)
+        } catch (e: Exception) {
+            return jsonError(
+                Response.Status.BAD_REQUEST,
+                e.message ?: "Failed to parse multipart body",
+                "invalid_request",
+            )
+        }
+
+        val tempPath = files["file"] ?: files["audio"]
+            ?: return jsonError(Response.Status.BAD_REQUEST, "Missing multipart file field", "invalid_request")
+
+        val language = session.parms["language"]?.trim()?.ifEmpty { null }
+        val languageTag = when (language?.lowercase()) {
+            null -> null
+            "ja" -> "ja-JP"
+            "en" -> "en-US"
+            else -> language
+        }
+
+        return try {
+            val bytes = java.io.File(tempPath).readBytes()
+            val pcm = AudioPcm.extractPcm16leMono16k(bytes)
+                ?: return jsonError(
+                    Response.Status.BAD_REQUEST,
+                    "Unsupported audio: need PCM s16le mono 16kHz (raw or WAV)",
+                    "invalid_request",
+                )
+            val text = scheduler.runExclusive {
+                stt.transcribePcm16leMono16k(pcm, languageTag)
+            }
+            json(Response.Status.OK, OpenAiSse.transcriptionJson(text))
+        } catch (e: SttException) {
+            val status =
+                if (e.code == "stt_unavailable") Response.Status.SERVICE_UNAVAILABLE
+                else Response.Status.INTERNAL_ERROR
+            jsonError(status, e.message ?: "transcription failed", e.code)
+        } catch (e: Throwable) {
+            jsonError(Response.Status.INTERNAL_ERROR, e.message ?: "transcription failed", "stt_error")
+        } finally {
+            try {
+                java.io.File(tempPath).delete()
+            } catch (_: Throwable) {
+            }
         }
     }
 

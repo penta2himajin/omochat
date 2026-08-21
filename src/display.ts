@@ -9,6 +9,24 @@ import {
   GLASSES_VIEWPORT_LINES,
   wrapByPixels,
 } from './glassesLayout.ts'
+import { takeUtf8Prefix, utf8ByteLength } from './hubPaint.ts'
+import { markdownToPlainGlasses } from './markdownPlain.ts'
+import {
+  formatVoiceRecordingClock,
+  voiceConfirmMenuItems,
+  type VoicePhase,
+} from './voiceUi.ts'
+
+export type { VoicePhase } from './voiceUi.ts'
+export {
+  VOICE_CONFIRM_RERECORD_ID,
+  VOICE_CONFIRM_SEND_ID,
+  VOICE_MAX_SECONDS,
+  VOICE_PCM_MAX_BYTES,
+  formatVoiceRecordingClock,
+  mergePcmChunks,
+  voiceConfirmMenuItems,
+} from './voiceUi.ts'
 
 export {
   GLASSES_BORDER_WIDTH,
@@ -24,15 +42,20 @@ export {
   wrapByPixels,
 } from './glassesLayout.ts'
 
-export const APP_VERSION = '0.0.23'
-/** Total TextContainer budget (Even Hub upgrade limit is ~2000). */
+export const APP_VERSION = '0.1.2'
+/**
+ * Even Hub textContainerUpgrade limit.
+ * Device probe (v0.0.24): rejection tracks UTF-8 bytes; utf8=2000 also failed,
+ * so we stay under TEXT_UPGRADE_SAFE_UTF8.
+ */
 export const TEXT_UPGRADE_MAX = 2000
+/** Safe UTF-8 byte ceiling for a full formatted TextContainer payload. */
+export const TEXT_UPGRADE_SAFE_UTF8 = 1900
 /** Full-width rule under the title; sized to the firmware content box. */
 export const TITLE_SEPARATOR = buildTitleSeparator()
 /**
  * header(2) + blank(1) + footer(2) reserved in history chrome layout comments.
- * History pages themselves use a character budget (see historyBodyMaxChars);
- * firmware may scroll within a page.
+ * History pages use a UTF-8 byte budget (see historyBodyMaxUtf8).
  */
 export const HISTORY_BODY_MAX_LINES = GLASSES_VIEWPORT_LINES - 5
 /**
@@ -50,16 +73,26 @@ export const HISTORY_CONTINUATION_PREFIX = '…'
 /** @deprecated Column heuristic; use GLASSES_CONTENT_WIDTH / getTextWidth. */
 export const GLASSES_LINE_COLUMNS = 46
 
-/** Chars reserved for header + footer so each history page stays under TEXT_UPGRADE_MAX. */
-export function historyChromeReserve(): number {
-  const header = `omochat v${APP_VERSION}\n${TITLE_SEPARATOR}`.length
-  const footer = `\n\nhistory 999/999\nswipe: page · double: menu`.length
-  return header + footer
+/** UTF-8 bytes reserved for header + footer on a history page. */
+export function historyChromeReserveUtf8(): number {
+  const header = `omochat v${APP_VERSION}\n${TITLE_SEPARATOR}`
+  const footer = `\n\nhistory 999/999\nswipe: page · double: menu`
+  return utf8ByteLength(header) + utf8ByteLength(footer)
 }
 
-/** Default body char budget for one history page (Hub TextContainer limit minus chrome). */
+/** @deprecated Prefer historyChromeReserveUtf8. */
+export function historyChromeReserve(): number {
+  return historyChromeReserveUtf8()
+}
+
+/** Default body UTF-8 budget for one history page. */
+export function historyBodyMaxUtf8(): number {
+  return Math.max(32, TEXT_UPGRADE_SAFE_UTF8 - historyChromeReserveUtf8())
+}
+
+/** @deprecated Prefer historyBodyMaxUtf8. */
 export function historyBodyMaxChars(): number {
-  return Math.max(32, TEXT_UPGRADE_MAX - historyChromeReserve())
+  return historyBodyMaxUtf8()
 }
 
 export type Mode = 'loading' | 'idle' | 'thinking' | 'error'
@@ -86,6 +119,12 @@ export type DisplayState = {
   /** Index into paginateHistory() page bodies; clamped by formatter. */
   historyPageIndex: number
   streamingTail: string
+  /** Glasses mic flow; `off` uses the normal selection menu. */
+  voicePhase: VoicePhase
+  /** Transcript awaiting confirm (send / re-record). */
+  voiceTranscript: string
+  /** Elapsed seconds while `voicePhase === 'recording'`. */
+  voiceRecordingElapsedSec: number
   loadingStep?: LoadingStep
   env: EnvProbeResult
   companion: CompanionProbeResult
@@ -147,7 +186,7 @@ export function buildMenuItems(prompts: string[]): MenuItem[] {
     ...prompts.map((label, i) => ({ id: `prompt-${i}`, label, kind: 'prompt' as const })),
     {
       id: MIC_MENU_ID,
-      label: 'tap: mic input (not implemented)',
+      label: '▷ tap: 録音開始',
       kind: 'mic',
     },
   ]
@@ -156,14 +195,26 @@ export function buildMenuItems(prompts: string[]): MenuItem[] {
 export function formatMessageLine(msg: ChatMessage, maxPx = GLASSES_CONTENT_WIDTH): string {
   const prefix = msg.role === 'user' ? 'You: ' : 'AI: '
   const prefixW = getTextWidth(prefix)
-  return prefix + clipByPixels(msg.content.replace(/\s+/g, ' ').trim(), Math.max(24, maxPx - prefixW))
+  const body = markdownToPlainGlasses(msg.content).replace(/\s+/g, ' ').trim()
+  return prefix + clipByPixels(body, Math.max(24, maxPx - prefixW))
 }
 
 /** Wrap a message across multiple lines (prefix on the first line only). */
 export function wrapMessageLines(msg: ChatMessage, maxPx = GLASSES_CONTENT_WIDTH): string[] {
   const prefix = msg.role === 'user' ? 'You: ' : 'AI: '
-  const body = msg.content.replace(/\s+/g, ' ').trim()
-  return wrapByPixels(prefix + body, maxPx)
+  const plain = markdownToPlainGlasses(msg.content)
+  const paragraphs = plain
+    .split(/\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+  if (paragraphs.length === 0) return wrapByPixels(prefix.trimEnd(), maxPx)
+
+  const out: string[] = []
+  paragraphs.forEach((para, i) => {
+    const chunk = i === 0 ? prefix + para : para
+    out.push(...wrapByPixels(chunk, maxPx))
+  })
+  return out
 }
 
 /** @deprecated Prefer wrapByPixels (firmware glyph metrics). */
@@ -221,14 +272,15 @@ function turnWrappedLines(turn: ChatMessage[]): string[] {
 }
 
 /**
- * Pack history into page bodies by Hub character budget (~TEXT_UPGRADE_MAX minus chrome).
+ * Pack history into page bodies by Hub UTF-8 byte budget (safe ceiling minus chrome).
  * Multiple turns share a page until the budget is full; overflow continues on the
- * next page ending with … and starting with …. Firmware may scroll within a page.
+ * next page. Continuation markers (trailing/leading …) are used only when a break
+ * cuts mid-message; clean breaks between You:/AI: turns have no markers.
  * Returns oldest→newest page body strings; empty history → one empty page.
  */
 export function paginateHistory(
   messages: ChatMessage[],
-  maxBodyChars: number = historyBodyMaxChars(),
+  maxBodyUtf8: number = historyBodyMaxUtf8(),
 ): string[] {
   if (messages.length === 0) return ['']
 
@@ -243,38 +295,86 @@ export function paginateHistory(
       )
       .join('\n')
 
+  const ellipsis = '…'
+  const ellipsisUtf8 = utf8ByteLength(ellipsis)
+  const isMessageStartLine = (line: string) => line.startsWith('You: ') || line.startsWith('AI: ')
+
+  const fitBody = (page: string): string => {
+    const widened = ensureLineWidths(page)
+    if (utf8ByteLength(widened) <= maxBodyUtf8) return widened
+    return takeUtf8Prefix(widened, maxBodyUtf8)
+  }
+
+  /** Prefer breaking before a You:/AI: line; else at any newline. */
+  const preferredChunk = (rest: string, budget: number): { chunk: string; atNewline: boolean } => {
+    const hard = takeUtf8Prefix(rest, budget)
+    if (!hard) return { chunk: '', atNewline: false }
+
+    const msgBreak = /\n(?=You: |AI: )/g
+    let lastMsgBreak = -1
+    let m: RegExpExecArray | null
+    while ((m = msgBreak.exec(hard)) !== null) {
+      lastMsgBreak = m.index
+    }
+    // Skip early message breaks (e.g. after a short "You: q") so we do not
+    // leave a near-empty first page and suppress mid-body … markers.
+    if (lastMsgBreak > 0 && lastMsgBreak >= Math.floor(hard.length * 0.4)) {
+      return { chunk: hard.slice(0, lastMsgBreak), atNewline: true }
+    }
+
+    const nl = hard.lastIndexOf('\n')
+    if (nl > 0 && nl >= Math.floor(hard.length * 0.4)) {
+      return { chunk: hard.slice(0, nl), atNewline: true }
+    }
+    return { chunk: hard, atNewline: false }
+  }
+
   const pages: string[] = []
   let offset = 0
   let continuation = false
 
   while (offset < stream.length) {
     const prefix = continuation ? HISTORY_CONTINUATION_PREFIX : ''
-    const restLen = stream.length - offset
-    if (prefix.length + restLen <= maxBodyChars) {
-      pages.push(ensureLineWidths(prefix + stream.slice(offset)))
+    const rest = stream.slice(offset)
+    const widenedWhole = ensureLineWidths(prefix + rest)
+    if (utf8ByteLength(widenedWhole) <= maxBodyUtf8) {
+      pages.push(widenedWhole)
       break
     }
 
-    // Leave one char for trailing …
-    const budget = maxBodyChars - prefix.length - 1
+    const prefixUtf8 = utf8ByteLength(prefix)
+    const budget = maxBodyUtf8 - prefixUtf8 - ellipsisUtf8
     if (budget <= 0) {
-      pages.push(ensureLineWidths((prefix + '…').slice(0, maxBodyChars)))
+      pages.push(fitBody(prefix + ellipsis))
       break
     }
 
-    let take = budget
-    const window = stream.slice(offset, offset + take)
-    const lastNl = window.lastIndexOf('\n')
-    // Prefer a line break when it still leaves a useful chunk.
-    if (lastNl > 0 && lastNl >= Math.floor(budget * 0.4)) {
-      take = lastNl
+    let { chunk, atNewline } = preferredChunk(rest, budget)
+    if (!chunk) {
+      chunk = takeUtf8Prefix(rest, Math.max(budget, 1))
+      atNewline = false
     }
-    if (take <= 0) take = Math.min(budget, stream.length - offset)
 
-    pages.push(ensureLineWidths(prefix + stream.slice(offset, offset + take) + '…'))
-    offset += take
-    if (stream[offset] === '\n') offset += 1
-    continuation = true
+    let nextOffset = offset + chunk.length
+    if (stream[nextOffset] === '\n') nextOffset += 1
+    const hasMore = nextOffset < stream.length
+    const nextLine = hasMore ? (stream.slice(nextOffset).split('\n')[0] ?? '') : ''
+    const cleanTurnBreak = hasMore && atNewline && isMessageStartLine(nextLine)
+    const needsMarker = hasMore && !cleanTurnBreak
+
+    pages.push(
+      needsMarker
+        ? (() => {
+            const marked = prefix + chunk + ellipsis
+            const fitted = fitBody(marked)
+            return fitted.endsWith(ellipsis)
+              ? fitted
+              : takeUtf8Prefix(fitted, maxBodyUtf8 - ellipsisUtf8) + ellipsis
+          })()
+        : fitBody(prefix + chunk),
+    )
+    offset = nextOffset
+    continuation = needsMarker
   }
 
   return pages.length > 0 ? pages : ['']
@@ -327,8 +427,7 @@ function formatDiagnostic(state: DisplayState): string {
   }
   lines.push('')
   lines.push('press/double: copy diagnostics')
-  const out = lines.join('\n')
-  return out.length > TEXT_UPGRADE_MAX ? out.slice(0, TEXT_UPGRADE_MAX - 1) + '…' : out
+  return finalize(lines)
 }
 
 export function formatHubText(state: DisplayState): string {
@@ -372,6 +471,31 @@ export function formatHubText(state: DisplayState): string {
   }
 
   // selection: last turn only, N-line budget, menu always last (idle).
+  if (state.voicePhase === 'recording') {
+    lines.push(`● 録音中  ${formatVoiceRecordingClock(state.voiceRecordingElapsedSec)}`)
+    lines.push('話してください')
+    lines.push('')
+    lines.push('■ tap: 録音停止')
+    return finalize(lines)
+  }
+
+  if (state.voicePhase === 'transcribing') {
+    lines.push('認識中...')
+    return finalize(lines)
+  }
+
+  if (state.voicePhase === 'confirm') {
+    lines.push('認識結果')
+    const body = fitLinesWithEllipsis(
+      wrapByPixels(state.voiceTranscript.trim() || '(空)'),
+      SELECTION_BODY_MAX_LINES,
+    )
+    lines.push(...body)
+    lines.push('')
+    lines.push(...formatMenu(voiceConfirmMenuItems(), state.selectedMenuIndex))
+    return finalize(lines)
+  }
+
   const preview = formatLastTurnPreview(state.messages, state.streamingTail, SELECTION_BODY_MAX_LINES)
   if (preview.length) {
     lines.push(...preview)
@@ -391,9 +515,9 @@ export function formatHubText(state: DisplayState): string {
 
 function finalize(lines: string[]): string {
   const out = lines.join('\n')
-  if (out.length <= TEXT_UPGRADE_MAX) return out
-  // Prefer code-point safe trim by UTF-16 length limit used by host.
-  return out.slice(0, TEXT_UPGRADE_MAX - 1) + '…'
+  if (utf8ByteLength(out) <= TEXT_UPGRADE_SAFE_UTF8) return out
+  const ellipsis = '…'
+  return takeUtf8Prefix(out, TEXT_UPGRADE_SAFE_UTF8 - utf8ByteLength(ellipsis)) + ellipsis
 }
 
 export function clamp(n: number, min: number, max: number): number {

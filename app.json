@@ -1,7 +1,7 @@
 {
   "package_id": "com.penta2himajin.omochat",
   "name": "Omochat",
-  "version": "0.0.23",
+  "version": "0.1.2",
   "edition": "202601",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.13",
@@ -13,6 +13,10 @@
       "whitelist": [
         "http://127.0.0.1:8765"
       ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Capture voice via the G2 four-mic array for speech-to-text chat."
     }
   ],
   "supported_languages": ["ja", "en"]

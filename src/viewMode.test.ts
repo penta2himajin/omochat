@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   formatHubText,
   buildMenuItems,
+  TEXT_UPGRADE_SAFE_UTF8,
   type DisplayState,
 } from './display.ts'
+import { textPayloadMetrics } from './hubPaint.ts'
 import { applyHistoryPageDelta, applyViewModeToggle, fullTextUpgradePayload } from './viewMode.ts'
 
 const base = {
@@ -53,7 +55,7 @@ describe('applyViewModeToggle', () => {
     expect(next).not.toBeNull()
     expect(next!.viewMode).toBe('history')
 
-    const menuItems = buildMenuItems(['こんにちは', 'コード書いて'])
+    const menuItems = buildMenuItems(['調べ物を手伝って', 'アイデアが欲しい'])
     const state: DisplayState = {
       mode: 'idle',
       viewMode: next!.viewMode,
@@ -62,6 +64,9 @@ describe('applyViewModeToggle', () => {
       messages,
       historyPageIndex: next!.historyPageIndex,
       streamingTail: '',
+      voicePhase: 'off',
+      voiceTranscript: '',
+      voiceRecordingElapsedSec: 0,
       env: {
         origin: '',
         protocol: '',
@@ -77,7 +82,7 @@ describe('applyViewModeToggle', () => {
       companionProbe: false,
     }
     const text = formatHubText(state)
-    expect(text.length).toBeLessThanOrEqual(2000)
+    expect(textPayloadMetrics(text).utf8Len).toBeLessThanOrEqual(TEXT_UPGRADE_SAFE_UTF8)
     expect(text).toContain('history ')
   })
 })
