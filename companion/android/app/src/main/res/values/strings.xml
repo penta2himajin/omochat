@@ -17,4 +17,5 @@
     <string name="chat_hint">Message…</string>
     <string name="chat_send">Send</string>
     <string name="copied">Copied</string>
+    <string name="calendar_permission_denied">カレンダー権限がないと予定を読めません</string>
 </resources>
