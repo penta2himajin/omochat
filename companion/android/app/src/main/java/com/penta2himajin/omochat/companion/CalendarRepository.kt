@@ -66,4 +66,92 @@ class CalendarRepository(private val context: Context) {
             }
         return out
     }
+
+    /**
+     * Load one event by [CalendarContract.Events] id (the id returned in list rows).
+     * Includes description and calendar metadata omitted from the compact list.
+     */
+    fun eventById(eventId: Long): CalendarEvent? {
+        if (!hasReadPermission()) {
+            throw SecurityException("READ_CALENDAR permission not granted")
+        }
+        if (eventId <= 0L) return null
+
+        val projection =
+            arrayOf(
+                CalendarContract.Events._ID,
+                CalendarContract.Events.TITLE,
+                CalendarContract.Events.DTSTART,
+                CalendarContract.Events.DTEND,
+                CalendarContract.Events.ALL_DAY,
+                CalendarContract.Events.EVENT_LOCATION,
+                CalendarContract.Events.DESCRIPTION,
+                CalendarContract.Events.ORGANIZER,
+                CalendarContract.Events.CALENDAR_ID,
+            )
+
+        context.contentResolver
+            .query(
+                ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+                projection,
+                null,
+                null,
+                null,
+            )
+            ?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+                val calendarId =
+                    cursor.getLong(
+                        cursor.getColumnIndexOrThrow(CalendarContract.Events.CALENDAR_ID),
+                    )
+                val dtStart = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART))
+                val dtEndRaw = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTEND))
+                val allDay = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)) == 1
+                val end =
+                    if (dtEndRaw > 0L) {
+                        Instant.ofEpochMilli(dtEndRaw)
+                    } else {
+                        Instant.ofEpochMilli(dtStart)
+                    }
+                return CalendarEvent(
+                    id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)),
+                    title = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE)) ?: "",
+                    begin = Instant.ofEpochMilli(dtStart),
+                    end = end,
+                    allDay = allDay,
+                    location =
+                        cursor.getString(
+                            cursor.getColumnIndexOrThrow(CalendarContract.Events.EVENT_LOCATION),
+                        ) ?: "",
+                    description =
+                        cursor.getString(
+                            cursor.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION),
+                        ) ?: "",
+                    calendarName = calendarDisplayName(calendarId),
+                    organizer =
+                        cursor.getString(
+                            cursor.getColumnIndexOrThrow(CalendarContract.Events.ORGANIZER),
+                        ) ?: "",
+                )
+            }
+        return null
+    }
+
+    private fun calendarDisplayName(calendarId: Long): String {
+        if (calendarId <= 0L) return ""
+        context.contentResolver
+            .query(
+                ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, calendarId),
+                arrayOf(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    return cursor.getString(0) ?: ""
+                }
+            }
+        return ""
+    }
 }

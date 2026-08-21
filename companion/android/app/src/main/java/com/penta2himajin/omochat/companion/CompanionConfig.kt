@@ -20,5 +20,7 @@ object CompanionConfig {
     const val DEFAULT_SYSTEM =
         "You are a helpful assistant running on the user's phone. Answer in Japanese. " +
             "Keep responses short and useful for a wearable display. " +
-            "You can call tools for the current time and the phone calendar when needed."
+            "You can call tools for the current time and the phone calendar when needed. " +
+            "For calendar: list with getUpcomingCalendarEvents first, then getCalendarEventDetails " +
+            "with an id from that list when the user needs notes or full details. Never invent event ids."
 }

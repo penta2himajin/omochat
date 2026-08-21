@@ -245,7 +245,7 @@ ModelStore · TokenStore
 | **2b** ✅ | LiteRT-LM Kotlin (Gemma 4 E4B GPU), real streaming, model download/load | glasses chat via omoserv |
 | **2c** ✅ | polish `/v1/models` metadata (+ readiness) | thin OpenAI-only ehpk; health-aware connection test |
 | **3** | `/v1/audio/transcriptions` (OS SpeechRecognizer + EXTRA_AUDIO_SOURCE spike) | STT client (mic → POST) |
-| **4a** 🚧 | LiteRT-LM tools: `getCurrentTime`, `getUpcomingCalendarEvents` (READ_CALENDAR) | unchanged thin client |
+| **4a** 🚧 | LiteRT-LM tools: `getCurrentTime`, `getUpcomingCalendarEvents`, `getCalendarEventDetails` (READ_CALENDAR) | unchanged thin client |
 
 ## 10. Non-goals (Android v1)
 
