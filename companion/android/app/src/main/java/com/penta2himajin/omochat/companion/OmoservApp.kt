@@ -18,7 +18,11 @@ class OmoservApp : Application() {
         tokenStore = TokenStore(this)
         tokenStore.getOrCreate()
         modelStore = ModelStore(this)
-        llm = LiteRtLmEngine(modelStore, cacheDir = File(cacheDir, "litertlm"))
+        llm = LiteRtLmEngine(
+            modelStore,
+            cacheDir = File(cacheDir, "litertlm"),
+            toolProviders = DeviceToolSets.providers(this),
+        )
     }
 
     companion object {

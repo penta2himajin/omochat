@@ -187,7 +187,7 @@ describe('paginateHistory (UTF-8 budget)', () => {
 describe('formatHubText selection / history', () => {
   it('renders selection menu with mic stub and full-width rule', () => {
     const text = formatHubText(minimalState({}))
-    expect(text).toContain('omochat v0.1.3')
+    expect(text).toContain('omochat v0.1.5')
     expect(text).toContain(TITLE_SEPARATOR)
     expect(text).toContain('▶︎ 調べ物を手伝って')
     expect(text).toContain('> アイデアが欲しい')

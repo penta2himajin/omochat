@@ -11,8 +11,8 @@ android {
         applicationId = "com.penta2himajin.omochat.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.3.2"
+        versionCode = 12
+        versionName = "0.3.5"
     }
 
     signingConfigs {
@@ -61,6 +61,7 @@ dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     testImplementation("junit:junit:4.13.2")
     // Android's org.json is not on the JVM classpath; use the portable artifact for unit tests.

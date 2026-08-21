@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
         app = application as OmoservApp
 
         maybeRequestNotificationPermission()
+        maybeRequestCalendarPermission()
         ensureRecordAudioThenStartService()
 
         findViewById<TextView>(R.id.apiUrl).text = CompanionConfig.API_BASE_URL
@@ -230,12 +231,24 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQ_RECORD_AUDIO) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            startCompanionService(refreshForeground = true)
-        } else {
-            Toast.makeText(this, "マイク権限がないと音声認識できません", Toast.LENGTH_LONG).show()
-            startCompanionService(refreshForeground = false)
+        when (requestCode) {
+            REQ_RECORD_AUDIO -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    startCompanionService(refreshForeground = true)
+                } else {
+                    Toast.makeText(this, "マイク権限がないと音声認識できません", Toast.LENGTH_LONG).show()
+                    startCompanionService(refreshForeground = false)
+                }
+            }
+            REQ_CALENDAR -> {
+                if (grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(
+                        this,
+                        R.string.calendar_permission_denied,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         }
     }
 
@@ -253,8 +266,22 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun maybeRequestCalendarPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.READ_CALENDAR),
+            REQ_CALENDAR,
+        )
+    }
+
     companion object {
         private const val REQ_NOTIFICATIONS = 1
         private const val REQ_RECORD_AUDIO = 2
+        private const val REQ_CALENDAR = 3
     }
 }

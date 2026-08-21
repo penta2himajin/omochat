@@ -53,11 +53,12 @@ export {
   wrapByPixels,
 } from './glassesLayout.ts'
 
-export const APP_VERSION = '0.1.3'
+export const APP_VERSION = '0.1.5'
 /**
  * Even Hub textContainerUpgrade limit.
  * Device probe (v0.0.24): rejection tracks UTF-8 bytes; utf8=2000 also failed,
  * so we stay under TEXT_UPGRADE_SAFE_UTF8.
+ * rebuildPageContainer is tighter (~1000 UTF-8) — see clipForRebuild in hubPaint.ts.
  */
 export const TEXT_UPGRADE_MAX = 2000
 /** Safe UTF-8 byte ceiling for a full formatted TextContainer payload. */
@@ -590,6 +591,10 @@ function paneHeightForLines(lineCount: number): number {
 /**
  * Selection-mode Hub layout: user dimmer, assistant brighter (attention on replies).
  * History / probe / error keep a single full-canvas pane via {@link formatHubText}.
+ *
+ * The menu pane is always pinned to the bottom of the canvas with isEventCapture=1.
+ * Body panes are line-budgeted to fit above it — otherwise Hub loses double-press /
+ * swipe when the capture container is laid out past y=288.
  */
 export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null {
   if (state.probeOnly || state.companionProbe) return null
@@ -605,7 +610,6 @@ export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null 
   }
 
   const header = headerLines(APP_VERSION)
-  const roles = formatLastTurnRoleLines(state.messages, state.streamingTail, SELECTION_BODY_MAX_LINES)
   const menuBlock: string[] = []
   if (state.mode === 'thinking') {
     menuBlock.push('generating…', 'press: cancel')
@@ -613,6 +617,16 @@ export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null 
     if (state.notice) menuBlock.push(clipByPixels(state.notice, GLASSES_CONTENT_WIDTH))
     menuBlock.push(...formatMenu(state.menuItems, state.selectedMenuIndex, voice))
   }
+
+  const menuH = paneHeightForLines(Math.max(1, menuBlock.length))
+  const menuY = Math.max(0, GLASSES_CANVAS_HEIGHT - menuH)
+  const headerH = paneHeightForLines(header.length)
+  const bodyBudgetPx = Math.max(0, menuY - headerH)
+  const bodyMaxLines = Math.max(
+    0,
+    Math.min(SELECTION_BODY_MAX_LINES, Math.floor(bodyBudgetPx / GLASSES_LINE_HEIGHT_PX)),
+  )
+  const roles = formatLastTurnRoleLines(state.messages, state.streamingTail, bodyMaxLines)
 
   const panes: HubTextPane[] = []
   let y = 0
@@ -624,9 +638,31 @@ export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null 
     lines: string[],
     textColor: number,
     capture: number,
+    maxBottom: number,
   ) => {
     if (lines.length === 0) return
-    const height = paneHeightForLines(lines.length)
+    let height = paneHeightForLines(lines.length)
+    if (y >= maxBottom) return
+    if (y + height > maxBottom) {
+      const fitLines = Math.floor((maxBottom - y) / GLASSES_LINE_HEIGHT_PX)
+      if (fitLines <= 0) return
+      height = paneHeightForLines(fitLines)
+      const clipped = fitLinesWithEllipsis(lines, fitLines)
+      panes.push({
+        containerID: id,
+        containerName: name,
+        xPosition: 0,
+        yPosition: y,
+        width: GLASSES_CANVAS_WIDTH,
+        height,
+        content: finalize(clipped),
+        textColor,
+        isEventCapture: capture,
+        zOrderIndex: z++,
+      })
+      y += height
+      return
+    }
     panes.push({
       containerID: id,
       containerName: name,
@@ -642,12 +678,10 @@ export function formatSelectionPanes(state: DisplayState): HubTextPane[] | null 
     y += height
   }
 
-  push(HUB_PANE_HEADER_ID, 'omo-header', header, TEXT_COLOR_CHROME, 0)
-  push(HUB_PANE_USER_ID, 'omo-user', roles.user, TEXT_COLOR_USER, 0)
-  push(HUB_PANE_ASSISTANT_ID, 'omo-assistant', roles.assistant, TEXT_COLOR_ASSISTANT, 0)
+  push(HUB_PANE_HEADER_ID, 'omo-header', header, TEXT_COLOR_CHROME, 0, menuY)
+  push(HUB_PANE_USER_ID, 'omo-user', roles.user, TEXT_COLOR_USER, 0, menuY)
+  push(HUB_PANE_ASSISTANT_ID, 'omo-assistant', roles.assistant, TEXT_COLOR_ASSISTANT, 0, menuY)
 
-  const menuH = paneHeightForLines(Math.max(1, menuBlock.length))
-  const menuY = Math.max(y, GLASSES_CANVAS_HEIGHT - menuH)
   panes.push({
     containerID: HUB_PANE_MENU_ID,
     containerName: 'omo-menu',

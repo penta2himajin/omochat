@@ -10,6 +10,7 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ToolProvider
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
 class LiteRtLmEngine(
     private val modelStore: ModelStore,
     private val cacheDir: File,
+    private val toolProviders: List<ToolProvider> = emptyList(),
 ) : LlmEngine {
     private val engineRef = AtomicReference<Engine?>(null)
     @Volatile private var backendName: String = "none"
@@ -86,6 +88,8 @@ class LiteRtLmEngine(
             systemInstruction = Contents.of(system),
             initialMessages = initial,
             samplerConfig = sampler,
+            tools = toolProviders,
+            automaticToolCalling = true,
         )
 
         // Prefer MessageCallback over Flow sendMessageAsync: the Flow path calls
