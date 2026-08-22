@@ -1,39 +1,54 @@
-# <Project Name>
+# omochat / omoserv
 
 ## Overview
 
-<!-- One to three paragraphs describing the project's purpose, target domain, and distinguishing characteristics. If detailed specs live under docs/, reference them with @docs/<file>.md. -->
+**omochat** is an Even G2 Hub plugin (`.ehpk`): thin OpenAI-compatible client + glasses UI.  
+**omoserv** is the Android companion under `companion/`: LiteRT-LM + `127.0.0.1:8765` API that omochat calls on-device.
+
+Verification layers and Cloud vs desk split: [`docs/dev-verification.md`](docs/dev-verification.md).  
+omoserv design: [`companion/docs/design.md`](companion/docs/design.md).
 
 ## Project Structure
 
-<!-- Directory layout with the role of each. Make explicit the boundary between source code, documentation, and generated artifacts. -->
-
 ```
-src/         # ...
-docs/        # ...
-tests/       # ...
+src/                 # omochat (Vite + Even Hub SDK)
+companion/android/   # omoserv Android app
+docs/                # engineering SoT (verification, handoff, i18n)
+scripts/             # Cloud install + Android SDK bootstrap
+.cursor/             # Cursor Cloud environment (Dockerfile + environment.json)
 ```
 
 ## Development Setup
 
-<!-- Required toolchain pins, bootstrap commands, external dependencies (DB, MCP servers). -->
-
 ```bash
-# example
-cargo install ...
-
-# Pre-push hook (format / lint / clippy).
+npm ci
+# Optional pre-push hook:
 cp git-hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+# omoserv (desk or Cloud after scripts/setup-android-sdk.sh):
+# ANDROID_SDK_ROOT must point at an SDK; companion/android/local.properties is gitignored.
 ```
+
+Cursor Cloud: `.cursor/environment.json` runs `scripts/cloud-install.sh` on Builds (Node 20, JDK 17, Android SDK 35, `npm ci`, vitest, Gradle unit tests). **No USB / Even Hub / GPU in managed Cloud VMs.**
 
 ## Build & Test
 
-<!-- Canonical verification commands. Must be runnable without prior setup so agents can self-verify. -->
+Canonical L0–L1 (agents must self-verify with these):
 
 ```bash
-cargo build --workspace
-cargo test  --workspace
+# omochat L0
+npm run verify:l0          # typecheck + vitest
+npm run pack               # .ehpk (bump patch versions when shipping)
+
+# omoserv L0 (needs Android SDK + local.properties sdk.dir)
+npm run test:omoserv       # ./gradlew testDebugUnitTest
+
+# Hub Simulator (L2a daily)
+npm run dev                # terminal A
+npm run sim                # terminal B → evenhub-simulator http://localhost:5173
 ```
+
+Desk L3/L4 only: install omoserv APK, `evenhub qr` / private / Beta + glasses. See `docs/dev-verification.md`.
 
 ## Development Principles
 

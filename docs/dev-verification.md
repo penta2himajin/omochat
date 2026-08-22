@@ -120,24 +120,24 @@ Hard limits of Cursor-managed cloud VMs today: no productized KVM Android emulat
 - Keep this SoT updated when layers or commands change.
 - Point agents here from `AGENTS.md`.
 
-### Phase 1 — L0/L1 green on Cloud
+### Phase 1 — L0/L1 green on Cloud ✅ (toolchain checked in)
 
-- `.cursor/environment.json`: Node 20, `npm ci`, `npm test`, `npm run pack`; JDK + Android SDK + Gradle unit tests.
+- `.cursor/environment.json` + `.cursor/Dockerfile` (Ubuntu 24.04, Node 20, JDK 17).
+- `scripts/cloud-install.sh` → `npm ci`, `scripts/setup-android-sdk.sh` (SDK 35), disposable debug keystore, `npm run verify:l0`, `gradlew testDebugUnitTest`.
+- Canonical commands live in `AGENTS.md` Build & Test (`verify:l0`, `test:omoserv`, `pack`, `sim`).
 - Do **not** require adb devices or emulators in Cloud install.
-- Record canonical commands in `AGENTS.md` Build & Test when filled in.
 
 ### Phase 2 — L2a Hub Simulator daily + automation
 
 ```bash
 npm run dev
-npx evenhub-simulator http://localhost:5173
-# CI / Cloud:
+npm run sim
+# CI / Cloud (later):
 npx evenhub-simulator http://localhost:5173 --automation-port 9898
 ```
 
-- Add `@evenrealities/evenhub-simulator` as a devDependency (or document `npx` pin).
-- Minimal automation: ping → ready log → glasses screenshot lit pixels → double_click exit path  
-  (patterns from official simulator docs).
+- `@evenrealities/evenhub-simulator` is a devDependency; `npm run sim` is the manual daily entry.
+- Still TODO: minimal automation smoke (ping → ready → lit pixels → exit).
 - omochat-specific: selection/history upgrades must not log hub paint failures under normal budgets.
 
 ### Phase 3 — L2b omoserv API contract
@@ -166,12 +166,11 @@ Priority order:
 
 ## 7. First implementation slice (for the main session)
 
-1. Scripts + any remaining AGENTS Build & Test fill-in aligned with this doc.
-2. `.cursor/environment.json` for L0–L1.
-3. Add Hub Simulator to the toolchain; standardize manual `sim` usage.
-4. Minimal simulator automation smoke.
-5. omoserv HTTP contract tests (L2b).
-6. Emulator WebView only if L2b still has gaps.
+1. ~~Scripts + AGENTS Build & Test + `.cursor/environment.json` for L0–L1.~~
+2. ~~Add Hub Simulator to the toolchain; standardize manual `sim` usage.~~
+3. Minimal simulator automation smoke (L2a).
+4. omoserv HTTP contract tests (L2b).
+5. Emulator WebView only if L2b still has gaps.
 
 ---
 

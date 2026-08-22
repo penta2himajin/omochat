@@ -10,7 +10,8 @@ companion/android/.idea/
 companion/android/local.properties
 .DS_Store
 *.log
-
+.android-sdk/
+.firecrawl/
 
 # Local signing keys (do not commit)
 companion/android/*.keystore

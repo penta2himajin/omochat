@@ -11,7 +11,10 @@
     "build": "npm run typecheck && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pack": "npm run build && evenhub pack app.json dist -o omochat.ehpk",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:l0": "npm run typecheck && npm test",
+    "test:omoserv": "cd companion/android && ./gradlew testDebugUnitTest --no-daemon",
+    "sim": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.14",
@@ -19,6 +22,7 @@
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vitest": "^3.2.4"

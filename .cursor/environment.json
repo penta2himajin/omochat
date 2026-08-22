@@ -1,0 +1,12 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "install": "bash scripts/cloud-install.sh",
+  "env": {
+    "ANDROID_HOME": "/workspace/.android-sdk",
+    "ANDROID_SDK_ROOT": "/workspace/.android-sdk",
+    "JAVA_HOME": "/usr/lib/jvm/java-17-openjdk-amd64"
+  }
+}
