@@ -40,8 +40,8 @@ Canonical L0–L1 (agents must self-verify with these):
 npm run verify:l0          # typecheck + vitest
 npm run pack               # .ehpk (bump patch versions when shipping)
 
-# omoserv L0 (needs Android SDK + local.properties sdk.dir)
-npm run test:omoserv       # ./gradlew testDebugUnitTest
+# omoserv L0 + L2b HTTP contract (needs Android SDK + local.properties sdk.dir)
+npm run test:omoserv       # ./gradlew testDebugUnitTest (includes CompanionHttpServerContractTest)
 
 # Hub Simulator (L2a daily)
 npm run dev                # terminal A

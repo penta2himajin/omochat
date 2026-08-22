@@ -6,12 +6,14 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 
 class CompanionHttpServer(
-    private val tokenStore: TokenStore,
+    private val tokenAuth: ApiTokenAuth,
     private val llm: LlmEngine,
     private val stt: SttEngine,
     private val scheduler: InferenceScheduler,
-    private val modelStore: ModelStore,
-) : NanoHTTPD(CompanionConfig.HOST, CompanionConfig.PORT) {
+    private val modelReadiness: ModelReadiness,
+    hostname: String = CompanionConfig.HOST,
+    port: Int = CompanionConfig.PORT,
+) : NanoHTTPD(hostname, port) {
 
     private val streamPool = Executors.newCachedThreadPool()
 
@@ -28,14 +30,14 @@ class CompanionHttpServer(
             )
             path == "/health" -> json(
                 Response.Status.OK,
-                """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT},"model_ready":${modelStore.isReady()},"llm_ready":${llm.isReady},"backend":${JsonAscii.string(llm.backendLabel)},"stt_ready":${stt.isAvailable},"stt_backend":${JsonAscii.string(stt.backendLabel)}}""",
+                """{"ok":true,"service":"omoserv","port":${CompanionConfig.PORT},"model_ready":${modelReadiness.isReady()},"llm_ready":${llm.isReady},"backend":${JsonAscii.string(llm.backendLabel)},"stt_ready":${stt.isAvailable},"stt_backend":${JsonAscii.string(stt.backendLabel)}}""",
             )
             path == "/v1/models" -> requireAuth(session) {
                 json(
                     Response.Status.OK,
                     OpenAiSse.modelsJson(
                         modelId = CompanionConfig.MODEL_ID,
-                        modelReady = modelStore.isReady(),
+                        modelReady = modelReadiness.isReady(),
                         llmReady = llm.isReady,
                         backend = llm.backendLabel,
                     ),
@@ -64,7 +66,7 @@ class CompanionHttpServer(
         val request = ChatRequestParser.parse(body)
             ?: return jsonError(Response.Status.BAD_REQUEST, "Invalid chat request", "invalid_request")
 
-        if (!modelStore.isReady()) {
+        if (!modelReadiness.isReady()) {
             return jsonError(
                 Response.Status.SERVICE_UNAVAILABLE,
                 "Model not downloaded. Open omoserv and tap Download model.",
@@ -183,7 +185,11 @@ class CompanionHttpServer(
 
     private fun requireAuth(session: IHTTPSession, block: () -> Response): Response {
         val token = extractBearer(session)
-        if (!tokenStore.matches(token)) {
+        if (!tokenAuth.matches(token)) {
+            // Drain POST/PUT bodies so NanoHTTPD can flush the 401 (otherwise clients see an empty body).
+            if (session.method == Method.POST || session.method == Method.PUT) {
+                runCatching { readUtf8Body(session) }
+            }
             return jsonError(Response.Status.UNAUTHORIZED, "Invalid API token", "invalid_api_key")
         }
         return block()

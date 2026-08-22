@@ -6,7 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.security.SecureRandom
 
-class TokenStore(context: Context) {
+class TokenStore(context: Context) : ApiTokenAuth {
     private val prefs = EncryptedSharedPreferences.create(
         context,
         PREFS_NAME,
@@ -29,7 +29,7 @@ class TokenStore(context: Context) {
         return token
     }
 
-    fun matches(candidate: String?): Boolean {
+    override fun matches(candidate: String?): Boolean {
         if (candidate.isNullOrBlank()) return false
         return candidate == current()
     }

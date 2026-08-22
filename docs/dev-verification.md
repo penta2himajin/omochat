@@ -140,12 +140,14 @@ npx evenhub-simulator http://localhost:5173 --automation-port 9898
 - Still TODO: minimal automation smoke (ping → ready → lit pixels → exit).
 - omochat-specific: selection/history upgrades must not log hub paint failures under normal budgets.
 
-### Phase 3 — L2b omoserv API contract
+### Phase 3 — L2b omoserv API contract ✅ (JVM live HTTP)
 
 Priority order:
 
-1. JVM/Node against `/hello`, `/health`, `/v1/models`, `/v1/chat/completions` (mock or short CPU response).
-2. Same contract via omochat `createOpenAiClient` + `browserConfigStorage`.
+1. ~~JVM against `/hello`, `/health`, `/v1/models`, `/v1/chat/completions` (stub LLM).~~  
+   `CompanionHttpServerContractTest` — real NanoHTTPD on ephemeral port, no Context / GPU.  
+   Covered by `npm run test:omoserv` / `scripts/cloud-install.sh`.
+2. Same contract via omochat `createOpenAiClient` + `browserConfigStorage` (optional follow-up).
 3. Optional: emulator APK + thin WebView (no GPU expectation).
 
 ### Phase 4 — Desk ritual (outside Cloud)
@@ -169,8 +171,8 @@ Priority order:
 1. ~~Scripts + AGENTS Build & Test + `.cursor/environment.json` for L0–L1.~~
 2. ~~Add Hub Simulator to the toolchain; standardize manual `sim` usage.~~
 3. Minimal simulator automation smoke (L2a).
-4. omoserv HTTP contract tests (L2b).
-5. Emulator WebView only if L2b still has gaps.
+4. ~~omoserv HTTP contract tests (L2b JVM).~~
+5. Optional: client+storage Vitest against live omoserv; emulator WebView only if still needed.
 
 ---
 

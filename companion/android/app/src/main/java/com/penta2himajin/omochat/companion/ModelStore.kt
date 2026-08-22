@@ -7,12 +7,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
-class ModelStore(context: Context) {
+class ModelStore(context: Context) : ModelReadiness {
     private val modelsDir = File(context.filesDir, "models").also { it.mkdirs() }
     private val modelFile = File(modelsDir, CompanionConfig.MODEL_FILE_NAME)
     private val downloading = AtomicBoolean(false)
 
-    fun isReady(): Boolean = modelFile.exists() && modelFile.length() > 1_000_000L
+    override fun isReady(): Boolean = modelFile.exists() && modelFile.length() > 1_000_000L
 
     fun modelPath(): String = modelFile.absolutePath
 

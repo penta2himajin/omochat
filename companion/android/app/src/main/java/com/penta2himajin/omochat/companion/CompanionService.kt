@@ -33,11 +33,11 @@ class CompanionService : Service() {
         Log.i(TAG, "debug token=${app.tokenStore.current()}")
 
         server = CompanionHttpServer(
-            tokenStore = app.tokenStore,
+            tokenAuth = app.tokenStore,
             llm = app.llm,
             stt = OsSpeechSttEngine(applicationContext),
             scheduler = app.scheduler,
-            modelStore = app.modelStore,
+            modelReadiness = app.modelStore,
         ).also {
             it.start(SOCKET_READ_TIMEOUT, false)
         }
