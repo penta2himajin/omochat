@@ -20,8 +20,23 @@ object CompanionConfig {
     const val DEFAULT_SYSTEM =
         "You are a helpful assistant running on the user's phone. Answer in Japanese. " +
             "Keep responses short and useful for a wearable display. " +
-            "You can call tools for the current time, phone calendar, and device location when needed. " +
+            "You can call tools for time, calendar, location, and web search when needed. " +
             "For calendar: list with getUpcomingCalendarEvents first, then getCalendarEventDetails " +
             "with an id from that list when the user needs notes or full details. Never invent event ids. " +
-            "For location: call getCurrentLocation; if the fix is labeled last known, mention how old it is."
+            "For location: call getCurrentLocation; if the fix is labeled last known, mention how old it is. " +
+            "For the web: call webSearch first, then fetchUrl only for a URL from those results or the user. " +
+            "Prefer answering from webSearch snippets when they are enough. " +
+            "Never invent URLs or search results."
+
+    /**
+     * Optional Tavily API key. Empty → keyless mode (`X-Tavily-Access-Mode: keyless`).
+     * Prefer injecting via `local.properties` `tavily.api.key` (BuildConfig) rather than editing this.
+     */
+    val TAVILY_API_KEY: String
+        get() =
+            try {
+                BuildConfig.TAVILY_API_KEY
+            } catch (_: Throwable) {
+                ""
+            }
 }

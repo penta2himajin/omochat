@@ -1,8 +1,14 @@
 # omoserv (Android)
 
-On-device AI service for **omochat** on Even G2. LiteRT-LM (Gemma 4 E4B GPU) + OpenAI-compatible HTTP API on `127.0.0.1:8765`, with on-device tools (time, calendar, location).
+On-device AI service for **omochat** on Even G2. LiteRT-LM (Gemma 4 E4B GPU) + OpenAI-compatible HTTP API on `127.0.0.1:8765`, with on-device tools (time, calendar, location, web search via Tavily with HTML SERP fallback).
 
 **Design spec:** [docs/design.md](./docs/design.md)
+
+Optional Tavily API key (otherwise keyless): add to `android/local.properties` (gitignored):
+
+```properties
+tavily.api.key=tvly-...
+```
 
 ## Product pair
 

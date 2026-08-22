@@ -11,6 +11,7 @@ object DeviceToolSets {
             tool(DeviceTimeToolSet()),
             tool(CalendarToolSet(CalendarRepository(appContext))),
             tool(LocationToolSet(LocationRepository(appContext))),
+            tool(WebSearchToolSet()),
         )
     }
 }

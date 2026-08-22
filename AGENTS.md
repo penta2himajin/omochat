@@ -39,6 +39,7 @@ cargo test  --workspace
 
 - Follow TDD (Red → Green → Refactor) for all implementation work. Write a failing test first; do not ship behaviour without a regression test.
 - When packing `omochat.ehpk` for device upload, always bump the patch version in `package.json`, `app.json`, and `src/display.ts` (`APP_VERSION`) together. Even Hub rejects installs if the version is unchanged.
+- omoserv (`companion/android` `versionName`) stays on the same **0.1.x** line as omochat. Bump only the **patch** when shipping an APK; never invent a new minor/major (e.g. 0.3 / 0.4) without an explicit user request. `versionCode` may still increase monotonically for Android installs.
 
 ## Architectural Boundaries
 

@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+val localProperties =
+    Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) {
+            f.inputStream().use { load(it) }
+        }
+    }
+val tavilyApiKey = localProperties.getProperty("tavily.api.key", "").replace("\"", "\\\"")
 
 android {
     namespace = "com.penta2himajin.omochat.companion"
@@ -11,8 +22,13 @@ android {
         applicationId = "com.penta2himajin.omochat.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.3.8"
+        versionCode = 19
+        versionName = "0.1.6"
+        buildConfigField("String", "TAVILY_API_KEY", "\"$tavilyApiKey\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -62,6 +78,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.jsoup:jsoup:1.18.3")
 
     testImplementation("junit:junit:4.13.2")
     // Android's org.json is not on the JVM classpath; use the portable artifact for unit tests.
