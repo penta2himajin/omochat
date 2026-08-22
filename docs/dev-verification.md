@@ -127,18 +127,21 @@ Hard limits of Cursor-managed cloud VMs today: no productized KVM Android emulat
 - Canonical commands live in `AGENTS.md` Build & Test (`verify:l0`, `test:omoserv`, `pack`, `sim`).
 - Do **not** require adb devices or emulators in Cloud install.
 
-### Phase 2 — L2a Hub Simulator daily + automation
+### Phase 2 — L2a Hub Simulator daily + automation ✅
 
 ```bash
+npm run verify:l2a
+# manual:
 npm run dev
-npm run sim
-# CI / Cloud (later):
-npx evenhub-simulator http://localhost:5173 --automation-port 9898
+npm run sim          # or npm run sim:auto for automation port
 ```
 
-- `@evenrealities/evenhub-simulator` is a devDependency; `npm run sim` is the manual daily entry.
-- Still TODO: minimal automation smoke (ping → ready → lit pixels → exit).
-- omochat-specific: selection/history upgrades must not log hub paint failures under normal budgets.
+- `@evenrealities/evenhub-simulator` is a devDependency.
+- `scripts/verify-l2a.sh` boots Vite + simulator (`--automation-port`), then `scripts/l2a-sim-smoke.mjs`:
+  ping → `[omochat] ready` console → lit-pixel framebuffer → gesture sequence (down/up/click) → still alive.
+  (System exit-dialog on double-tap is L4 / Beta QA — omochat consumes double_click for view toggle.)
+- Headless Linux uses `xvfb-run` (installed in `.cursor/Dockerfile`).
+- Smoke loads `?companionProbe=0` so it does not require omoserv on :8765.
 
 ### Phase 3 — L2b omoserv API contract ✅ (JVM live HTTP)
 
@@ -170,9 +173,11 @@ Priority order:
 
 1. ~~Scripts + AGENTS Build & Test + `.cursor/environment.json` for L0–L1.~~
 2. ~~Add Hub Simulator to the toolchain; standardize manual `sim` usage.~~
-3. Minimal simulator automation smoke (L2a).
+3. ~~Minimal simulator automation smoke (L2a).~~
 4. ~~omoserv HTTP contract tests (L2b JVM).~~
 5. Optional: client+storage Vitest against live omoserv; emulator WebView only if still needed.
+
+**Deskless gate before merge:** `npm run verify:deskless` (L0 + L2b + L2a). L3/L4 remain desk-only.
 
 ---
 

@@ -39,4 +39,7 @@ echo "cloud-install: omochat vitest + typecheck"
 npm test
 npm run typecheck
 
+echo "cloud-install: L2a Hub Simulator smoke"
+bash "$ROOT/scripts/verify-l2a.sh"
+
 echo "cloud-install: done"

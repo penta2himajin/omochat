@@ -845,6 +845,8 @@ async function main() {
         }),
       )
       hubLayout = 'single'
+      // L2a / Hub automation readiness marker (see docs/dev-verification.md).
+      console.info('[omochat] ready')
 
       hub.onLaunchSource((source) => {
         if (source === 'glassesMenu') {

@@ -33,7 +33,7 @@ Cursor Cloud: `.cursor/environment.json` runs `scripts/cloud-install.sh` on Buil
 
 ## Build & Test
 
-Canonical L0–L1 (agents must self-verify with these):
+Canonical L0–L2 deskless checks (agents must self-verify with these):
 
 ```bash
 # omochat L0
@@ -43,9 +43,13 @@ npm run pack               # .ehpk (bump patch versions when shipping)
 # omoserv L0 + L2b HTTP contract (needs Android SDK + local.properties sdk.dir)
 npm run test:omoserv       # ./gradlew testDebugUnitTest (includes CompanionHttpServerContractTest)
 
-# Hub Simulator (L2a daily)
-npm run dev                # terminal A
-npm run sim                # terminal B → evenhub-simulator http://localhost:5173
+# Hub Simulator (L2a)
+npm run dev                # terminal A (manual)
+npm run sim                # terminal B (manual UI)
+npm run verify:l2a         # automated: Vite + simulator + ping/ready/lit/gestures
+
+# Everything except real device (L3/L4)
+npm run verify:deskless    # verify:l0 + test:omoserv + verify:l2a
 ```
 
 Desk L3/L4 only: install omoserv APK, `evenhub qr` / private / Beta + glasses. See `docs/dev-verification.md`.

@@ -13,6 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     openjdk-17-jdk-headless \
     python3 \
+    xvfb \
+    libgtk-3-0 \
+    libwebkit2gtk-4.1-0 \
+    libnss3 \
+    libxss1 \
+    libasound2t64 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 20 (matches package.json engines)
