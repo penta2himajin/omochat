@@ -41,6 +41,14 @@ cargo test  --workspace
 - When packing `omochat.ehpk` for device upload, always bump the patch version in `package.json`, `app.json`, and `src/display.ts` (`APP_VERSION`) together. Even Hub rejects installs if the version is unchanged.
 - omoserv (`companion/android` `versionName`) stays on the same **0.1.x** line as omochat. Bump only the **patch** when shipping an APK; never invent a new minor/major (e.g. 0.3 / 0.4) without an explicit user request. `versionCode` may still increase monotonically for Android installs.
 
+## Verification & Cursor Cloud
+
+Source of truth: [`docs/dev-verification.md`](docs/dev-verification.md).
+
+- **Cloud / CI:** L0–L2 only (unit/static, pack/assemble, Hub Simulator automation, omoserv HTTP contract). Do not require USB devices, Even Hub UI, or GPU inference in managed Cloud VMs.
+- **Desk:** L3 omoserv on device and L4 Even QR / private / Beta + glasses. That is where BLE, LiteRT GPU, and lock-screen behaviour are confirmed.
+- Day-to-day Even plugin loop matches upstream: Vite → `evenhub-simulator` → `evenhub qr` → `evenhub pack`.
+
 ## Architectural Boundaries
 
 <!-- Structural invariants that, if violated, break the design. Examples:
