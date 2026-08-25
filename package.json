@@ -16,8 +16,12 @@
     "test:omoserv": "cd companion/android && ./gradlew testDebugUnitTest --no-daemon",
     "sim": "evenhub-simulator http://localhost:5173",
     "sim:auto": "evenhub-simulator \"http://127.0.0.1:5173/?companionProbe=0\" --automation-port 9898",
-    "verify:l2a": "bash scripts/verify-l2a.sh",
+    "verify:l2a": "even-deskless verify-l2a",
     "verify:deskless": "npm run verify:l0 && npm run test:omoserv && npm run verify:l2a"
+  },
+  "evenDeskless": {
+    "readyMarker": "[omochat] ready",
+    "appUrl": "http://127.0.0.1:5173/?companionProbe=0"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.14",
@@ -26,7 +30,7 @@
   "devDependencies": {
     "@evenrealities/evenhub-cli": "0.1.14",
     "@evenrealities/evenhub-simulator": "^0.9.3",
-    "pngjs": "^7.0.0",
+    "@penta2himajin/even-deskless": "^0.1.2",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vitest": "^3.2.4"

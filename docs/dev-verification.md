@@ -137,8 +137,9 @@ npm run sim          # or npm run sim:auto for automation port
 ```
 
 - `@evenrealities/evenhub-simulator` is a devDependency.
-- `scripts/verify-l2a.sh` boots Vite + simulator (`--automation-port`), then `scripts/l2a-sim-smoke.mjs`:
+- L2a automation is `@penta2himajin/even-deskless` (`npm run verify:l2a` → `even-deskless verify-l2a`):
   ping → `[omochat] ready` console → lit-pixel framebuffer → gesture sequence (down/up/click) → still alive.
+  Config: `package.json` `evenDeskless.readyMarker` / `evenDeskless.appUrl` (`?companionProbe=0`).
   (System exit-dialog on double-tap is L4 / Beta QA — omochat consumes double_click for view toggle.)
 - Headless Linux uses `xvfb-run` (installed in `.cursor/Dockerfile`).
 - Smoke loads `?companionProbe=0` so it does not require omoserv on :8765.
